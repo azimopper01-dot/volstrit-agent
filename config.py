@@ -145,14 +145,21 @@ AUTO_PUBLISH_LABEL = "HA" if AUTO_PUBLISH else "YO'Q (tasdiqlash kerak)"
 # Aks holda konteyner.filesystem ephemeral bo'lib, har deploy'da bazasi tozalanadi.
 _db_env = os.getenv("DB_PATH", "").strip()
 _volume = Path("/data")
+
 if _db_env:
-    DB_PATH = _db_env
+    # Nisbiy yo'l konteynerda ish papkasiga bog'liq bo'lishi mumkin —
+    # har doim BASE_DIR ga nisbatan aniqlaymiz.
+    _p = Path(_db_env)
+    DB_PATH = str(_p if _p.is_absolute() else (BASE_DIR / _p))
 elif _volume.is_dir() and os.access(str(_volume), os.W_OK):
     DB_PATH = "/data/posts.db"
 else:
     DB_PATH = str(DATA_DIR / "posts.db")
 
-DB_IS_PERSISTENT = DB_PATH.startswith("/data")
+Path(DB_PATH).parent.mkdir(parents=True, exist_ok=True)
+# "Doimiy" degani — /data haqiqatan ham mavjud va yoziladimi (Railway Volume).
+# Faqat yo'l nomiga qarab emas, haqiqiy holatni tekshiramiz.
+DB_IS_PERSISTENT = _volume.is_dir() and os.access(str(_volume), os.W_OK)
 
 
 # ===== XAVFSIZLIK =====
