@@ -1,114 +1,300 @@
 """
-scheduler.py — Kunlik va haftalik vazifalarni rejalashtiradi.
+scheduler.py — Kunlik, haftalik va real vaqtda berilgan vazifalarni bajaradi.
+
+TUZATILGAN ASOSIY XATO:
+    Eski kodda `CronTrigger(hour=h, minute=m)` timezone BERILMAGAN edi.
+    APScheduler 3.x bunday trigger'ni konteynerning mahalliy vaqti bilan
+    yaratadi — Railway'da bu UTC. Natijada barcha postlar +5 soat kechikadi
+    (08:30 -> 13:30). Endi har bir trigger'ga `timezone=TZ` aniq beriladi.
+
+QO'SHILGANLAR:
+  * misfire_grace_time — ish kechikib kelsa ham bajariladi
+  * coalesce — ko'p o'tkazilgan ishni bittaga jamlaydi
+  * catch-up — konteyner ish vaqtida qayta ishga tushsa, o'tib ketgan
+    ish darhol bajariladi (post hech qachon o'tkazilmaydi)
+  * heartbeat — tiriklikni logga yozib turadi
+  * /schedule orqali beriladigan real vaqt vazifalari
 """
+import asyncio
+import logging
+from datetime import datetime, timedelta
+
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from apscheduler.triggers.cron import CronTrigger
-from zoneinfo import ZoneInfo
+from apscheduler.triggers.interval import IntervalTrigger
 
 from config import (
     POST_TIME_MORNING, POST_TIME_NOON, POST_TIME_EVENING,
-    POLL_DAY, POLL_TIME, TIMEZONE
+    POLL_DAY, POLL_TIME, TIMEZONE, TZ, ADMIN_ID,
+    AUTO_PUBLISH, AUTO_PUBLISH_LABEL, AI_DAILY_LIMIT, NOTIFY_ADMIN, now_tz,
 )
-from telegram_bot import create_and_send_post, create_and_send_poll
+import database
+from telegram_bot import create_and_send_post, create_and_send_poll, safe_send
 
-# Vaqt mintaqasi
-TZ = ZoneInfo(TIMEZONE)
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
+)
+logger = logging.getLogger("scheduler")
 
-# Scheduler
 scheduler = AsyncIOScheduler(timezone=TZ)
+
+# Ish nomlari -> (job_id, vaqt, tip)
+JOBS_META = {}
 
 
 def parse_time(time_str: str):
     """'08:30' -> (8, 30)"""
-    hour, minute = time_str.split(":")
-    return int(hour), int(minute)
-
-
-async def job_morning_post():
-    """Ertalabki post (08:30)."""
-    print("🌅 Ertalabki post yaratilmoqda...")
     try:
-        await create_and_send_post(post_type="morning")
-        print("✅ Ertalabki post adminga yuborildi.")
-    except Exception as e:
-        print(f"❌ Ertalabki post xatolik: {e}")
+        hour, minute = str(time_str).strip().split(":")
+        return int(hour), int(minute)
+    except (ValueError, AttributeError):
+        logger.error("Vaqt formati noto'g'ri: %r (08:30 kutilgan)", time_str)
+        raise
 
 
-async def job_noon_post():
-    """Tushlikdagi post (13:00)."""
-    print("☀️ Tushlikdagi post yaratilmoqda...")
+# ===== BARCHA ISHLAR UCHUN YAGONA ISHIVCHI =====
+async def _run_job(job_id: str, label: str, coro_factory, catch_up: bool = False):
+    """
+    Ishni bajaradi, natijani bazaga yozadi va xatolarni ushlaydi.
+    Hech qachon job butunlay "jimgina" xotiraga ketmaydi.
+    """
+    prefix = "🔁 Qayta bajarilmoqda" if catch_up else "▶️ Bajarilmoqda"
+    print(f"{prefix}: {label}")
     try:
-        await create_and_send_post(post_type="noon")
-        print("✅ Tushlikdagi post adminga yuborildi.")
+        result = await coro_factory()
+        await database.mark_job_run(job_id, "ok")
+        print(f"✅ {label} — bajarildi")
+        return result
     except Exception as e:
-        print(f"❌ Tushlikdagi post xatolik: {e}")
+        logger.exception("%s ishida xato", label)
+        await database.mark_job_run(job_id, "failed", error=f"{type(e).__name__}: {e}")
+        print(f"❌ {label} — xato: {type(e).__name__}: {e}")
+        if NOTIFY_ADMIN:
+            try:
+                await safe_send(
+                    ADMIN_ID,
+                    f"🚨 <b>Ish bajarilmadi: {label}</b>\n"
+                    f"Xato: {str(e)[:400]}\n"
+                    f"Job: <code>{job_id}</code>",
+                )
+            except Exception:
+                pass
+        return None
 
 
-async def job_evening_post():
-    """Kechki post (18:30)."""
-    print("🌆 Kechki post yaratilmoqda...")
+# ===== KUNLIK ISHLAR =====
+async def job_morning_post(catch_up: bool = False):
+    return await _run_job(
+        "morning_post", f"🌅 Ertalabki post ({POST_TIME_MORNING})",
+        lambda: create_and_send_post(post_type="morning"), catch_up
+    )
+
+
+async def job_noon_post(catch_up: bool = False):
+    return await _run_job(
+        "noon_post", f"☀️ Tushlikdagi post ({POST_TIME_NOON})",
+        lambda: create_and_send_post(post_type="noon"), catch_up
+    )
+
+
+async def job_evening_post(catch_up: bool = False):
+    return await _run_job(
+        "evening_post", f"🌆 Kechki post ({POST_TIME_EVENING})",
+        lambda: create_and_send_post(post_type="evening"), catch_up
+    )
+
+
+async def job_weekly_poll(catch_up: bool = False):
+    return await _run_job(
+        "weekly_poll", f"📊 Haftalik so'rovnoma ({POLL_DAY} {POLL_TIME})",
+        create_and_send_poll, catch_up
+    )
+
+
+# ===== REAL VAQTDA BERILGAN VAZIFALAR =====
+async def heartbeat_tick():
+    """
+    Har 1 daqiqada /schedule orqali berilgan vazifalarni tekshiradi va bajaradi.
+    Bu — "uzluksiz ishlash"ning kaliti: ishlab qolsa ham, qayta ishga
+    tushsa ham hech bir vazifa yo'qolmaydi.
+    """
+    await run_adhoc_tasks()
+
+
+async def run_adhoc_tasks():
+    """Muddati kelgan /schedule vazifalarini bajaradi."""
+    now = now_tz()
     try:
-        await create_and_send_post(post_type="evening")
-        print("✅ Kechki post adminga yuborildi.")
+        tasks = await database.get_pending_adhoc_tasks()
     except Exception as e:
-        print(f"❌ Kechki post xatolik: {e}")
+        logger.warning("Adhoc vazifalarni o'qib bo'lmadi: %s", e)
+        return
+
+    for t in tasks:
+        try:
+            run_at = datetime.fromisoformat(t["run_at"])
+        except ValueError:
+            await database.finish_adhoc_task(t["id"], "failed", "vaqt formati xato")
+            continue
+
+        if run_at > now:
+            continue
+
+        print(f"⏱ Real vaqt vazifasi #{t['id']}: {t['topic']}")
+        try:
+            await create_and_send_post(topic=t["topic"])
+            await database.finish_adhoc_task(t["id"], "ok")
+        except Exception as e:
+            logger.exception("Adhoc vazifa xatosi")
+            await database.finish_adhoc_task(t["id"], "failed", str(e))
 
 
-async def job_weekly_poll():
-    """Haftalik so'rovnoma (yakshanba 10:00)."""
-    print("📊 Haftalik so'rovnoma yaratilmoqda...")
-    try:
-        await create_and_send_poll()
-        print("✅ So'rovnoma adminga yuborildi.")
-    except Exception as e:
-        print(f"❌ So'rovnoma xatolik: {e}")
+async def heartbeat_log():
+    """Har 10 daqiqada bir marta tiriklik belgisini yozadi."""
+    ai_used = await database.ai_used_today()
+    today = await database.get_today_posts_count()
+    upcoming = []
+    for job in scheduler.get_jobs():
+        nxt = getattr(job, "next_run_time", None)
+        if nxt and job.id != "heartbeat":
+            upcoming.append(f"{job.id}@{nxt:%H:%M}")
+    print(
+        f"💓 Tirik | {now_tz():%H:%M:%S} ({TIMEZONE}) | "
+        f"bugun: {today} post | AI: {ai_used}/{AI_DAILY_LIMIT} | "
+        f"keyingi: {', '.join(sorted(upcoming)) or '-'}"
+    )
 
 
+# ===== CATCH-UP (o'tib ketgan ishni tutish) =====
+async def catch_up_missed_jobs():
+    """
+    Ishga tushishda bugunning vaqt o'tib ketgan ishlari bajarilganmi tekshiriladi.
+    Konteyner 08:35 da qayta ishga tushsa, 08:30 dagi post darhol chiqadi.
+    """
+    now = now_tz()
+    caught = 0
+
+    plan = [
+        ("morning_post", POST_TIME_MORNING, job_morning_post),
+        ("noon_post", POST_TIME_NOON, job_noon_post),
+        ("evening_post", POST_TIME_EVENING, job_evening_post),
+    ]
+
+    # Haftalik so'rovnoma: faqat to'g'ri kun bo'lsa
+    if POLL_DAY[:3].lower() == now.strftime("%a").lower():
+        plan.append(("weekly_poll", POLL_TIME, job_weekly_poll))
+
+    for job_id, time_str, func in plan:
+        try:
+            h, m = parse_time(time_str)
+        except ValueError:
+            continue
+
+        scheduled = now.replace(hour=h, minute=m, second=0, microsecond=0)
+        if now < scheduled:
+            continue  # hali vaqti kelmagan
+
+        if await database.job_already_ran(job_id):
+            continue  # bugun allaqachon bajarilgan
+
+        # Bir kundan eskirgan bo'lsa o'tkazib yuboramiz
+        if (now - scheduled) > timedelta(days=1):
+            continue
+
+        dt = (now - scheduled).total_seconds() / 60
+        print(
+            f"⚠️  '{job_id}' ishi {dt:.0f} daqiqa kechikan — "
+            f"HOZIR bajarilmoqda (catch-up)"
+        )
+        await func(catch_up=True)
+        caught += 1
+
+    if caught:
+        print(f"🔁 Jami {caught} ta kechikkan ish tiklandi.")
+    else:
+        print("✅ Kechikkan ish topilmadi.")
+    return caught
+
+
+# ===== SOZLASH =====
 def setup_scheduler():
     """Barcha vazifalarni rejalashtiradi."""
-    # Ertalabki post
-    h, m = parse_time(POST_TIME_MORNING)
-    scheduler.add_job(
-        job_morning_post,
-        CronTrigger(hour=h, minute=m),
-        id="morning_post",
-        replace_existing=True,
-        name=f"Ertalabki post ({POST_TIME_MORNING})"
-    )
+    JOBS_META.clear()
 
-    # Tushlikdagi post
-    h, m = parse_time(POST_TIME_NOON)
-    scheduler.add_job(
-        job_noon_post,
-        CronTrigger(hour=h, minute=m),
-        id="noon_post",
-        replace_existing=True,
-        name=f"Tushlikdagi post ({POST_TIME_NOON})"
-    )
+    daily = [
+        ("morning_post", POST_TIME_MORNING, job_morning_post, "🌅 Ertalabki post"),
+        ("noon_post", POST_TIME_NOON, job_noon_post, "☀️ Tushlikdagi post"),
+        ("evening_post", POST_TIME_EVENING, job_evening_post, "🌆 Kechki post"),
+    ]
 
-    # Kechki post
-    h, m = parse_time(POST_TIME_EVENING)
-    scheduler.add_job(
-        job_evening_post,
-        CronTrigger(hour=h, minute=m),
-        id="evening_post",
-        replace_existing=True,
-        name=f"Kechki post ({POST_TIME_EVENING})"
-    )
+    for job_id, time_str, func, label in daily:
+        h, m = parse_time(time_str)
+        scheduler.add_job(
+            func,
+            # >>> TUZATISH: timezone=TZ majburiy. Aks holda UTC ishlatiladi. <<<
+            CronTrigger(hour=h, minute=m, timezone=TZ),
+            id=job_id,
+            replace_existing=True,
+            name=f"{label} ({time_str} {TIMEZONE})",
+            # kechikib kelsa ham bajarilsin, o'tkazilmasin
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
+        )
+        JOBS_META[job_id] = (time_str, label)
 
     # Haftalik so'rovnoma
     h, m = parse_time(POLL_TIME)
     scheduler.add_job(
         job_weekly_poll,
-        CronTrigger(day_of_week=POLL_DAY[:3], hour=h, minute=m),
+        CronTrigger(day_of_week=POLL_DAY[:3], hour=h, minute=m, timezone=TZ),
         id="weekly_poll",
         replace_existing=True,
-        name=f"Haftalik so'rovnoma ({POLL_DAY} {POLL_TIME})"
+        name=f"📊 Haftalik so'rovnoma ({POLL_DAY} {POLL_TIME} {TIMEZONE})",
+        misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
+    )
+    JOBS_META["weekly_poll"] = (POLL_TIME, "📊 Haftalik so'rovnoma")
+
+    # Real vaqt vazifalari uchun "tik" — har daqiqada tekshiradi
+    scheduler.add_job(
+        heartbeat_tick,
+        IntervalTrigger(minutes=1),
+        id="heartbeat",
+        replace_existing=True,
+        name="💓 Real vaqt vazifalari (1 daqiqa)",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # 10 daqiqada bir tiriklik logi
+    scheduler.add_job(
+        heartbeat_log,
+        IntervalTrigger(minutes=10),
+        id="status_log",
+        replace_existing=True,
+        name="💓 Status log",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Eski AI hisoblarini tozalash
+    scheduler.add_job(
+        database.prune_ai_usage,
+        IntervalTrigger(hours=24),
+        id="cleanup",
+        replace_existing=True,
+        name="🧹 Tozalash",
     )
 
     print("✅ Scheduler sozlandi:")
     for job in scheduler.get_jobs():
+        nxt = getattr(job, "next_run_time", None)
+        when = f"{nxt:%Y-%m-%d %H:%M}" if nxt else "?"
         print(f"   • {job.name}")
+        print(f"       keyingi: {when} ({TIMEZONE})")
 
 
 def start_scheduler():
@@ -116,10 +302,42 @@ def start_scheduler():
     setup_scheduler()
     scheduler.start()
     print("🚀 Scheduler ishga tushdi.")
+    print(f"🌍 Vaqt mintaqasi: {TIMEZONE} | Hozir: {now_tz():%Y-%m-%d %H:%M:%S}")
+    print(f"📤 Avtomatik kanalga yuborish: {AUTO_PUBLISH_LABEL}")
+
+
+async def notify_startup(next_runs: str):
+    """Ishga tushganda adminga qisqa xabar."""
+    if not NOTIFY_ADMIN:
+        return
+    try:
+        await safe_send(
+            ADMIN_ID,
+            "🚀 <b>Volstrit Agent ishga tushdi!</b>\n\n"
+            f"🌍 Vaqt mintaqasi: <code>{TIMEZONE}</code>\n"
+            f"🕐 Hozir: <b>{now_tz():%Y-%m-%d %H:%M}</b>\n"
+            f"📤 Avtomatik yuborish: {AUTO_PUBLISH_LABEL}\n\n"
+            f"{next_runs}\n\n"
+            f"📖 Yordam: /help",
+        )
+    except Exception as e:
+        print(f"⚠️ Adminga xabar yuborilmadi: {e}")
+
+
+def next_run_summary() -> str:
+    """Keyingi ish vaqtlarini qisqa matn qilib qaytaradi."""
+    rows = []
+    for job in scheduler.get_jobs():
+        if job.id in ("heartbeat", "status_log", "cleanup"):
+            continue
+        nxt = getattr(job, "next_run_time", None)
+        if nxt:
+            rows.append(f"   • {job.name} → {nxt:%H:%M}")
+    return "\n".join(sorted(rows, key=lambda s: s.split("→")[-1].strip()))
 
 
 def stop_scheduler():
     """Schedulerni to'xtatadi."""
     if scheduler.running:
-        scheduler.shutdown()
+        scheduler.shutdown(wait=False)
         print("🛑 Scheduler to'xtatildi.")
