@@ -4,11 +4,12 @@ database.py — Postlar tarixi, job natijalari va AI kvota hisobi.
 Barcha sanalar vaqt mintaqasi (config.TZ) bo'yicha saqlanadi.
 """
 import json
+from datetime import timedelta
 from typing import Optional
 
 import aiosqlite
 
-from config import DB_PATH, TZ, now_iso, today_str
+from config import DB_PATH, now_tz, now_iso, today_str
 
 
 # ===== YOZISH ===
@@ -154,6 +155,16 @@ async def update_post_status(
 async def get_pending_posts():
     return await _query_all(
         "SELECT * FROM posts WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20"
+    )
+
+
+async def get_stale_pending_posts(older_than_hours: int):
+    """Ko'p vaqtdan beri tasdiqlanmagan postlar (eslatish uchun)."""
+    cutoff = (now_tz() - timedelta(hours=older_than_hours)).isoformat(timespec="seconds")
+    return await _query_all(
+        "SELECT * FROM posts WHERE status = 'pending' AND created_at <= ? "
+        "ORDER BY created_at ASC LIMIT 10",
+        (cutoff,)
     )
 
 

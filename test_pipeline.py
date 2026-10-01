@@ -1,13 +1,18 @@
 """
 test_pipeline.py — Butun oqimni AI/Telegram stubs bilan sinovdan o'tkazadi.
 
+HOZIRGI REJIM: AUTO_PUBLISH=false
+  -> post avval ADMINGA yuboriladi, kanalga faqat "Tasdiqlash"dan keyin chiqadi
+
 Sinov qilinadiganlar:
   1. Ma'lumotlar bazasi va jadvallar yaratiladi
   2. Kechikkan ish "catch-up" bilan tiklanadi (post o'tkazilmaydi)
-  3. Real vaqtda berilgan vazifa (/schedule) o'z vaqtida bajariladi
-  4. Job natijalari bazaga yoziladi — takrorlashning oldi olinadi
-  5. AI kvota hisobi ishlaydi, chegara yetganda zaxira matn ishlatiladi
-  6. AI kvota tugab qolganda post KANALGA yuboriladi (bo'sh qolmaydi)
+  3. Job natijalari bazaga yoziladi — takrorlashning oldi olinadi
+  4. Real vaqtda berilgan vazifa (/schedule) o'z vaqtida bajariladi
+  5. AI kvota: chegarada AI chaqirilmaydi, zaxira matn bilan post chiqadi
+  6. 429 rate-limit: server aytgancha kutib, qayta urinadi
+  7. ADMIN TUGMASI: "Tasdiqlash" -> kanalga chiqadi, "Rad etish" -> chiqmaydi
+  8. HTML belgilari kanalni buzmaydi
 """
 import asyncio
 import os
@@ -27,7 +32,7 @@ os.environ["ADMIN_ID"] = "5543462752"
 os.environ["CHANNEL_ID"] = "@VolstritStart"
 os.environ["GEMINI_API_KEY"] = "stub-key"
 os.environ["GEMINI_MODEL"] = "stub-model"
-os.environ["AUTO_PUBLISH"] = "true"
+os.environ["AUTO_PUBLISH"] = "false"      # <-- TASDIQLASH REJIMI
 os.environ["AI_DAILY_LIMIT"] = "20"
 os.environ["AI_MINUTE_LIMIT"] = "20"
 os.environ["POST_TIME_MORNING"] = "08:30"
@@ -36,18 +41,40 @@ os.environ["POST_TIME_EVENING"] = "18:30"
 os.environ["POLL_DAY"] = "sunday"
 os.environ["POLL_TIME"] = "10:00"
 
-from zoneinfo import ZoneInfo
-TZ = ZoneInfo(TZ_NAME)
-
 # ---------- TELEGRAM STUB ----------
 SENT = []          # (chat_id, text)
+DELETED = []       # (chat_id, message_id)
 CALLS = {"generate": 0}
+QUOTA_MODE = {"on": False}
 
 
 class FakeMsg:
     def __init__(self, mid):
         self.message_id = mid
         self.text = ""
+
+    async def answer(self, text="", **kw):
+        SENT.append((f"reply:{self.message_id}", text))
+
+    async def edit_reply_markup(self, reply_markup=None):
+        return True
+
+
+class FakeUser:
+    def __init__(self, uid):
+        self.id = uid
+
+
+class FakeCallback:
+    """cb_approve / cb_reject va h.k. ni sinash uchun."""
+    def __init__(self, data, uid):
+        self.data = data
+        self.from_user = FakeUser(uid)
+        self.message = FakeMsg(999)
+        self.answers = []
+
+    async def answer(self, text="", show_alert=False):
+        self.answers.append(text)
 
 
 class FakeBot:
@@ -66,6 +93,7 @@ class FakeBot:
         return FakeMsg(self._mid)
 
     async def delete_message(self, chat_id, mid):
+        DELETED.append((chat_id, mid))
         return True
 
     async def delete_webhook(self, **kw):
@@ -77,19 +105,9 @@ class FakeBot:
     session = _Session()
 
 
-def _stub_module(name, **attrs):
-    m = types.ModuleType(name)
-    for k, v in attrs.items():
-        setattr(m, k, v)
-    sys.modules[name] = m
-    return m
-
-
 def _identity_decorator(*a, **k):
-    """Router.message(...) / Router.callback_query(...) uchun"""
     def wrap(fn):
         return fn
-    # ishlatilishi mumkin: @router.message(Cmd) yoki @router.message
     if len(a) == 1 and callable(a[0]) and not k:
         return a[0]
     return wrap
@@ -101,21 +119,26 @@ class FakeRouter:
 
 
 # aiogram
-_stub_module("aiogram", Bot=FakeBot,
-             Dispatcher=lambda: types.SimpleNamespace(
-                 include_router=lambda r: None, start_polling=None),
-             F=types.SimpleNamespace(
-                 data=types.SimpleNamespace(startswith=lambda s: False),
-                 text=object()),
-             Router=FakeRouter)
-_stub_module("aiogram.types", Message=object, CallbackQuery=object,
-             InlineKeyboardMarkup=lambda **k: k,
-             InlineKeyboardButton=lambda **k: k)
-_stub_module("aiogram.client", )
-_stub_module("aiogram.client.default",
-             DefaultRequestProperties=lambda **k: types.SimpleNamespace(**k))
-_stub_module("aiogram.filters", Command=lambda *a, **k: None)
-_stub_module("aiogram.enums", ParseMode=types.SimpleNamespace(HTML="HTML"))
+_stub_module = lambda name, **attrs: (
+    sys.modules.__setitem__(name, types.SimpleNamespace(**attrs)) or sys.modules[name]
+)
+sys.modules["aiogram"] = types.SimpleNamespace(
+    Bot=FakeBot,
+    Dispatcher=lambda: types.SimpleNamespace(
+        include_router=lambda r: None, start_polling=None),
+    F=types.SimpleNamespace(
+        data=types.SimpleNamespace(startswith=lambda s: False),
+        text=object()),
+    Router=FakeRouter,
+)
+sys.modules["aiogram.types"] = types.SimpleNamespace(
+    Message=object, CallbackQuery=object,
+    InlineKeyboardMarkup=lambda **k: k, InlineKeyboardButton=lambda **k: k)
+sys.modules["aiogram.client"] = types.ModuleType("aiogram.client")
+sys.modules["aiogram.client.default"] = types.SimpleNamespace(
+    DefaultRequestProperties=lambda **k: types.SimpleNamespace(**k))
+sys.modules["aiogram.filters"] = types.SimpleNamespace(Command=lambda *a, **k: None)
+sys.modules["aiogram.enums"] = types.SimpleNamespace(ParseMode=types.SimpleNamespace(HTML="HTML"))
 
 
 class _ApiErr(Exception):
@@ -126,17 +149,16 @@ class _Rsrc(_ApiErr):
     pass
 
 
-_stub_module("aiogram.exceptions",
-             TelegramRetryAfter=type("TelegramRetryAfter", (_ApiErr,), {}),
-             TelegramBadRequest=type("TelegramBadRequest", (_ApiErr,), {}),
-             TelegramNetworkError=type("TelegramNetworkError", (_ApiErr,), {}),
-             TelegramForbiddenError=type("TelegramForbiddenError", (_ApiErr,), {}),
-             TelegramConflictError=type("TelegramConflictError", (_ApiErr,), {}))
+sys.modules["aiogram.exceptions"] = types.SimpleNamespace(
+    TelegramRetryAfter=type("TelegramRetryAfter", (_ApiErr,), {}),
+    TelegramBadRequest=type("TelegramBadRequest", (_ApiErr,), {}),
+    TelegramNetworkError=type("TelegramNetworkError", (_ApiErr,), {}),
+    TelegramForbiddenError=type("TelegramForbiddenError", (_ApiErr,), {}),
+    TelegramConflictError=type("TelegramConflictError", (_ApiErr,), {}),
+)
+
 
 # ---------- GEMINI STUB ----------
-QUOTA_MODE = {"on": False}
-
-
 class FakeModel:
     def __init__(self, name=None):
         self.name = name
@@ -158,13 +180,12 @@ class FakeModel:
         )
 
 
-_stub_module("google")
-_stub_module("google.generativeai",
-             configure=lambda **k: None,
-             GenerativeModel=lambda name=None: FakeModel(name))
-_stub_module("google.api_core")
-_stub_module("google.api_core.exceptions",
-             ResourceExhausted=_Rsrc, GoogleAPIError=_ApiErr)
+sys.modules["google"] = types.ModuleType("google")
+sys.modules["google.generativeai"] = types.SimpleNamespace(
+    configure=lambda **k: None, GenerativeModel=lambda name=None: FakeModel(name))
+sys.modules["google.api_core"] = types.ModuleType("google.api_core")
+sys.modules["google.api_core.exceptions"] = types.SimpleNamespace(
+    ResourceExhausted=_Rsrc, GoogleAPIError=_ApiErr)
 
 # ---------- DASTURNI IMPORT QILISH ----------
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
@@ -183,10 +204,19 @@ def check(label, cond, extra=""):
     print(f"  {OK if cond else FAIL} {label}" + (f" — {extra}" if extra else ""))
 
 
+def to_channel():
+    return any(c == "@VolstritStart" for c, _ in SENT)
+
+
+def to_admin():
+    return any(c == config.ADMIN_ID for c, _ in SENT)
+
+
 async def main():
-    print("=" * 66)
-    print("🧪 VOLSTRIT AGENT — TO'LIQ OQIM SINOVI")
-    print("=" * 66)
+    print("=" * 68)
+    print("🧪 VOLSTRIT AGENT — TO'LIQ OQIM SINOVI (AUTO_PUBLISH=false)")
+    print("=" * 68)
+    print(f"   Rejim: post avval admonga -> tasdiqlashdan keyin kanalga")
     print(f"   Sozlangan vaqt (TZ={TZ_NAME}): {FIXED_NOW:%Y-%m-%d %H:%M:%S}\n")
 
     # vaqtni qat'iy qilamiz
@@ -213,118 +243,81 @@ async def main():
 
     # ---------- 2. CATCH-UP ----------
     print("\n2️⃣  Kechikkan ishlar 'catch-up' bilan tiklanadi")
-    print(f"    Hozir soat: {FIXED_NOW:%H:%M}  "
-          f"(o'tib ketgan: 08:30 va 13:00, kelgusi: 18:30)")
+    print(f"    Hozir soat: {FIXED_NOW:%H:%M}  (o'tib ketgan: 08:30 va 13:00, kelgusi: 18:30)")
     SENT.clear()
     CALLS["generate"] = 0
     await sch.catch_up_missed_jobs()
 
-    posts_today = await database.get_today_posts_count()
     check("08:30 va 13:00 ishlari tiklandi (2 ta post)",
-          posts_today == 2, f"bazada {posts_today} ta 'sent' post")
-    check("18:30 ishi hali VAQT KELMAGAN — bajarilmadi", posts_today == 2)
-    check("postlar KANALGA yuborildi",
-          any(c == "@VolstritStart" for c, _ in SENT),
-          f"{sum(1 for c,_ in SENT if c=='@VolstritStart')} ta kanal xabari")
-    check("adminga ham ko'rsatildi",
-          any(c == config.ADMIN_ID for c, _ in SENT))
-    check("AI chaqirildi", CALLS["generate"] >= 2, f"{CALLS['generate']} marta")
-
-    # ---------- 3. JOB NATIJALARI (takrorlash oldi olinadi) ----------
-    print("\n3️⃣  Job natijalari bazaga yozildi")
-    check("morning_post bajarilgan deb belgilangan",
-          await database.job_already_ran("morning_post"))
-    check("noon_post bajarilgan deb belgilangan",
-          await database.job_already_ran("noon_post"))
-    check("evening_post hali BELGILANMAGAN",
+          await database.get_today_posts_count() == 0, "hali hech biri kanalda emas")
+    check("18:30 ishi hali VAQT KELMAGAN — bajarilmadi",
           not await database.job_already_ran("evening_post"))
+    check("AI chaqirildi", CALLS["generate"] >= 2, f"{CALLS['generate']} marta")
+    check("postlar ADMINGA yuborildi (tasdiqlash uchun)", to_admin())
+    check("KANALGA HALI YO'Q (tasdiqlash kutilmoqda)", not to_channel())
+    pend = await database.get_pending_posts()
+    check("postlar 'pending' holatida saqlanib qoldi", len(pend) == 2,
+          f"{len(pend)} ta pending")
 
-    print("    ↻ catch-up'ni ikkinchi marta chaqirish (takrorlash tekshiruvi):")
-    before = await database.get_today_posts_count()
+    # ---------- 3. JOB NATIJALARI ----------
+    print("\n3️⃣  Job natijalari bazaga yozildi (takrorlash oldi olinadi)")
+    check("morning_post bajarilgan", await database.job_already_ran("morning_post"))
+    check("noon_post bajarilgan", await database.job_already_ran("noon_post"))
+    print("    ↻ catch-up'ni 2-marta chaqirish:")
+    SENT.clear()
     await sch.catch_up_missed_jobs()
-    after = await database.get_today_posts_count()
-    check("takror post yaratilmadi", before == after,
-          f"{before} -> {after}")
+    check("takror ADMINGA xabar yuborilmadi", not to_admin(),
+          "hech narsa yuborilmadi = takror yo'q")
 
     # ---------- 4. REAL VAQT VAZIFASI ----------
     print("\n4️⃣  /schedule orqali berilgan real vaqt vazifasi")
     past = (FIXED_NOW - timedelta(minutes=3)).isoformat(timespec="seconds")
     future = (FIXED_NOW + timedelta(hours=2)).isoformat(timespec="seconds")
-    tid1 = await database.add_adhoc_task(past, "Bitcoin haqida")
-    tid2 = await database.add_adhoc_task(future, "Ertasi kunga")
+    await database.add_adhoc_task(past, "Bitcoin haqida")
+    await database.add_adhoc_task(future, "Ertasi kunga")
     CALLS["generate"] = 0
     SENT.clear()
     await sch.run_adhoc_tasks()
     check("muddati kelgan vazifa bajarildi (AI chaqirildi)", CALLS["generate"] == 1)
-    check("bajarilgan vazifa 'ok' deb belgilandi",
-          (await database.get_pending_adhoc_tasks()).__len__() == 1)
-    check("kelgusi vazifa kutayapti", await database.job_already_ran("morning_post"))
+    check("bajarilgan vazifa 'ok' belgilandi, kelgusi kutilmoqda",
+          len(await database.get_pending_adhoc_tasks()) == 1)
+    check("vazifa natijasi ADMINGA yuborildi", to_admin())
 
-    # ---------- 5. AI KVOTA ----------
-    print("\n5️⃣  AI kvota hisobi va chegarasi")
-    # chegarani import vaqtida binding bo'lgani uchun patch qilamiz
+    # ---------- 5. KVOTA HIMOYASI ----------
+    print("\n5️⃣  AI kvota: chegarada AI chaqirilmaydi, zaxira matn bilan post chiqadi")
     ai.AI_DAILY_LIMIT = 10
     ai.AI_MINUTE_LIMIT = 20
-    used = await database.ai_used_today()
-    check("AI so'rovlari sanaldi", used >= 3, f"{used} / 10")
     check("chegara ichida — AI chaqiriladi", await ai.can_call_ai())
-
     while await database.ai_used_today() < 10:
         await database.record_ai_call(True, "test")
     check("chegara yetgach AI chaqirilmaydi", not await ai.can_call_ai())
 
-    # ---------- 6. KVOTA TUGAB QOLSA HAM KANAL BO'SH QOLMAYDI ----------
-    print("\n6️⃣  AI kvota tugab qolsa ham post kanalga chiqadi")
-    SENT.clear()
-    before_calls = CALLS["generate"]
-    post_id = await tg.create_and_send_post(post_type="evening")
-    check("post yaratildi (xato bermadi)", post_id is not None)
-    check("AI chaqirilmadi (kvota himoyalangan)",
-          CALLS["generate"] == before_calls)
-    check("post KANALGA yuborildi",
-          any(c == "@VolstritStart" for c, _ in SENT))
-    p = await database.get_post(post_id)
-    check("bazada 'sent' holatida", p["status"] == "sent")
-    check("zaxira matn ishlatildi (to'liq mazmunli)",
-          len(p["content"] or "") > 200, f"{len(p['content'])} belgi")
-
-    # ------ 6b. kunlik (PerDay) kvota — qayta urishning ma'nosiz ------
-    print("\n6️⃣b Kunlik kvota (PerDay) — darhol zaxiraga o'tadi")
-    QUOTA_MODE["on"] = True
-    ai.AI_DAILY_LIMIT = 100
     calls_before = CALLS["generate"]
     SENT.clear()
-    p3 = await tg.create_and_send_post(post_type="noon")
-    check("PerDay 429 da bir martta urildi, ko'p urilmadi",
-          CALLS["generate"] == calls_before + 1,
-          f"{CALLS['generate'] - calls_before} urinish")
-    check("post yana ham kanalga yuborildi",
-          any(c == "@VolstritStart" for c, _ in SENT))
-    check("zaxira matn bilan kanalga tushdi",
-          len((await database.get_post(p3))["content"]) > 200)
+    pid = await tg.create_and_send_post(post_type="evening")
+    check("AI chaqirilmadi", CALLS["generate"] == calls_before)
+    check("post yana ham ADMINGA yuborildi", to_admin())
+    check("zaxira matn ishlatildi (to'liq mazmunli)",
+          len((await database.get_post(pid))["content"]) > 200,
+          f"{len((await database.get_post(pid))['content'])} belgi")
 
-    # chegarani ochamiz, qolgan testlar uchun
-    ai.AI_DAILY_LIMIT = 50
+    print("\n5️⃣b Kunlik kvota (PerDay) — darhol zaxiraga o'tadi")
+    ai.AI_DAILY_LIMIT = 100
+    QUOTA_MODE["on"] = True
+    before = CALLS["generate"]
+    pid2 = await tg.create_and_send_post(post_type="noon")
+    check("PerDay 429 da bir marta urildi, ko'p urilmadi",
+          CALLS["generate"] == before + 1,
+          f"{CALLS['generate'] - before} urinish")
+    check("post yana ham ADMINGA yuborildi (yo'qolmadi)", to_admin())
     QUOTA_MODE["on"] = False
-
-    # ---------- 7. HTML XAVFSIZLIGI ----------
-    print("\n7️⃣  AI matnidagi HTML belgilari kanalni buzmaydi")
-    SENT.clear()
-    await tg.create_and_send_post(post_type="morning")
-    chan = [t for c, t in SENT if c == "@VolstritStart"]
-    check("kanalga yuborilgan matnda qoldiq HTML teg yo'q",
-          chan and "<b>" not in chan[-1] and "&" not in chan[-1],
-          repr(chan[-1][:60]) if chan else "yo'q")
-    check("matn 4096 belgidan oshmaydi",
-          chan and len(chan[-1]) <= 4096, f"{len(chan[-1])} belgi")
-
-    # ---------- 8. 429 RETRY ----------
-    print("\n8️⃣  429 rate-limit: server aytgancha kutib, qayta urinadi")
     ai.AI_DAILY_LIMIT = 50
+
+    # ---------- 6. 429 RETRY ----------
+    print("\n6️⃣  429 rate-limit: server aytgancha kutib, qayta urinadi")
     RATE = {"left": 2}
 
     class RateModel:
-        """2 marta 429 beradi, keyin muvaffaqiyatli javob qaytaradi."""
         def __init__(self, name=None):
             pass
 
@@ -333,31 +326,99 @@ async def main():
             if RATE["left"] > 0:
                 RATE["left"] -= 1
                 raise _Rsrc(
-                    "429 Resource has been exhausted. "
-                    "Please retry in 28.3s. quota_id: "
-                    "GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
+                    "429 Resource has been exhausted. Please retry in 28.3s. "
+                    "quota_id: GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
                 )
             return types.SimpleNamespace(text="Retry muvaffaqiyatli javob berdi.")
 
     ai.model = RateModel()
-    ai.AI_RETRY_BASE_DELAY = 0        # testni tezlashtirish uchun
+    ai.AI_RETRY_BASE_DELAY = 0
     ai.AI_MAX_RETRY_WAIT = 1
-    p2 = await tg.create_and_send_post(post_type="morning")
-    check("429 dan keyin qayta urilib muvaffaqiyatli bo'ldi",
-          "Retry muvaffaqiyatli" in (await database.get_post(p2))["content"])
+    pid3 = await tg.create_and_send_post(post_type="morning")
+    check("429 dan keyin qayta urib muvaffaqiyatli bo'ldi",
+          "Retry muvaffaqiyatli" in (await database.get_post(pid3))["content"])
 
-    # ---------- 9. STATISTIKA ----------
-    print("\n9️⃣  Statistika")
+    # ---------- 7. ADMIN TUGMALARI ----------
+    print("\n7️⃣  Admin tugmalari: Tasdiqlash / Rad etish / O'chirish")
+    target = (await database.get_pending_posts())[-1]
+    tpid = target["id"]
+
+    # --- Tasdiqlash ---
+    SENT.clear()
+    cb = FakeCallback(f"approve_{tpid}", config.ADMIN_ID)
+    await tg.cb_approve(cb)
+    p = await database.get_post(tpid)
+    check("'Tasdiqlash' -> post KANALGA yuborildi", to_channel())
+    check("...va holati 'sent' bo'ldi", p["status"] == "sent", p["status"])
+    check("...va kanal xabari id saqlandi", p["message_id"] is not None)
+
+    # --- Rad etish ---
+    rej = (await database.get_pending_posts())[0]
+    cb2 = FakeCallback(f"reject_{rej['id']}", config.ADMIN_ID)
+    await tg.cb_reject(cb2)
+    check("'Rad etish' -> holati 'rejected'",
+          (await database.get_post(rej["id"]))["status"] == "rejected")
+
+    # --- Ruxsatsiz user ---
+    SENT.clear()
+    cb3 = FakeCallback(f"approve_{tpid}", 999999)
+    await tg.cb_approve(cb3)
+    check("boshqa user tasdiqlay olmaydi", any("Ruxsat" in a for a in cb3.answers))
+
+    # --- Takror tasdiqlash (double-click) ---
+    cb4 = FakeCallback(f"approve_{tpid}", config.ADMIN_ID)
+    await tg.cb_approve(cb4)
+    check("ikkinchi marta tasdiqlash rad etiladi (2 marta chiqmaydi)",
+          any("allaqachon" in a for a in cb4.answers))
+
+    # ---------- 8. HTML XAVFSIZLIGI ----------
+    print("\n8️⃣  AI matnidagi HTML belgilari kanalni buzmaydi")
+    SENT.clear()
+    hp = await tg.create_and_send_post(post_type="morning")
+    # tasdiqlash -> kanalga chiqadi
+    await tg.cb_approve(FakeCallback(f"approve_{hp}", config.ADMIN_ID))
+    chan = [t for c, t in SENT if c == "@VolstritStart"]
+    check("tasdiqlangan post kanalga chiqdi", len(chan) == 1, f"{len(chan)} ta")
+    check("kanal matnida qoldiq HTML teg yo'q",
+          chan and "<b>" not in chan[-1] and "&" not in chan[-1],
+          repr(chan[-1][:55]) if chan else "yo'q")
+    check("matn 4096 belgidan oshmaydi",
+          chan and len(chan[-1]) <= 4096,
+          f"{len(chan[-1])} belgi" if chan else "yo'q")
+
+    # ---------- 9. ESLATISH ----------
+    print("\n9️⃣  Tasdiqlanmagan postga eslatish (APPROVAL_TIMEOUT_HOURS)")
+    # haqiqatan ESKI pending post yaratamiz (2 soatdan ko'p)
+    old = (FIXED_NOW - timedelta(hours=config.APPROVAL_TIMEOUT_HOURS + 1)).isoformat(
+        timespec="seconds")
+    await database.save_post(content="Eski post", topic="test")
+    async with aiosqlite.connect(database.DB_PATH) as db:
+        await db.execute(
+            "UPDATE posts SET created_at = ?, status = 'pending' "
+            "WHERE id = (SELECT MAX(id) FROM posts)", (old,))
+        await db.commit()
+
+    stale = await database.get_stale_pending_posts(config.APPROVAL_TIMEOUT_HOURS)
+    check("vaqt o'tgan pending postlar topildi", len(stale) >= 1,
+          f"{len(stale)} ta (>{config.APPROVAL_TIMEOUT_HOURS} soat)")
+    SENT.clear()
+    await sch.job_remind_pending()
+    check("adminga eslatish yuborildi", to_admin())
+
+    # ---------- 10. STATISTIKA ----------
+    print("\n🔟  Statistika")
     s = await database.get_stats()
-    check("bugungi postlar hisoblandi", s["today"] >= 4, f"bugun: {s['today']}")
-    check("jami yuborilgan", s["total_sent"] >= 4, f"jami: {s['total_sent']}")
+    check("jami yaratilgan", s["total"] >= 8, f"{s['total']}")
+    check("kanalga yuborilgan (tasdiqlangan)", s["total_sent"] >= 1, f"{s['total_sent']}")
+    check("rad etilgan", s["rejected"] >= 1, f"{s['rejected']}")
+    check("tasdiqlash kutilmoqda", s["pending"] >= 1, f"{s['pending']}")
 
     # ---------- NATIJA ----------
-    print("\n" + "=" * 66)
+    print("\n" + "=" * 68)
     passed = sum(1 for c, _, _ in results if c)
     total = len(results)
     print(f"📊 NATIJA: {passed}/{total} test o'tdi")
-    print("=" * 66)
+    print("=" * 68)
     if passed != total:
         print("\n❌ Xato bergan testlar:")
         for c, lbl, extra in results:

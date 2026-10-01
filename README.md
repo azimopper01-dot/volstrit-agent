@@ -75,14 +75,29 @@ Yuborilgan post xabaridagi tugmalar:
 
 ## 📤 Yuborish tartibi
 
-`AUTO_PUBLISH=true` (standart): post tayyor bo'lgach **avtomatik kanalga
-chiqadi**. Adminga ko'rish uchun nusxa + boshqaruv tugmalari yuboriladi.
-Xato bo'lsa, "Kanaldan o'chirish" bilan bir zumda olib tashlanadi.
+**Hozirgi rejim: `AUTO_PUBLISH=false`** (tasdiqlash bilan)
 
-`AUTO_PUBLISH=false`: post avval adminga yuboriladi, "Tasdiqlash" tugmasi
-bosilgach kanalga chiqadi.
+`
+08:30 da bot AI orqali post yozadi
+   -> post SIZGA yuboriladi (tugmalar bilan)
+   -> siz qoniqarsangiz "✅ Tasdiqlash" bosasiz
+   -> FAQAT SHUNDAN KEYIN kanalga chiqadi
+`
 
----
+Sizga keladigan xabarda 4 ta tugma bor:
+
+| Tugma | Vazifasi |
+|---|---|
+| ✅ Tasdiqlash | Kanalga chiqaradi |
+| ❌ Rad etish | Bekor qiladi |
+| ✏️ Qayta yozish | Keyin qisqaroq qil 12 / oshqa mavzu: kripto deb yozasiz |
+| ⏭ Keyingi | O'tkazib yuboradi |
+
+Agar 2 soat ichida tasdiqlanmasa, bot sizga **eslatish** yuboradi
+(`/pending` orqali ko'rish mumkin).
+
+Almashtirish uchun `AUTO_PUBLISH=true` — unda post avtomatik kanalga
+chiqadi va siz keyinchalik "Kanaldan o'chirish" bilan olib tashlashingiz mumkin.
 
 ## 🔒 Nima uchun kanal hech qachon bo'sh qolmaydi
 
@@ -128,7 +143,7 @@ POST_TIME_NOON     = 13:00
 POST_TIME_EVENING  = 18:30
 POLL_DAY           = sunday
 POLL_TIME          = 10:00
-AUTO_PUBLISH       = true
+AUTO_PUBLISH       = false
 DB_PATH            = /data/posts.db     # faqat Volume qo'shsangiz
 ```
 
@@ -211,9 +226,10 @@ python test_tz_fix.py
 python test_pipeline.py
 ```
 
-`test_pipeline.py` 33 ta tekshiruvni bajaradi: catch-up, takrorlashning
+`test_pipeline.py` 40 ta tekshiruvni bajaradi: catch-up, takrorlashning
 oldi olinishi, real vaqt vazifalari, kvota himoyasi, 429 retry, HTML
-tozalash, statistika.
+tozalash, admin tugmalari (tasdiqlash / rad etish / ruxsat), eslatish,
+statistika.
 
 ---
 

@@ -16,6 +16,7 @@ QO'SHILGANLAR:
   * /schedule orqali beriladigan real vaqt vazifalari
 """
 import asyncio
+import html
 import logging
 from datetime import datetime, timedelta
 
@@ -27,6 +28,7 @@ from config import (
     POST_TIME_MORNING, POST_TIME_NOON, POST_TIME_EVENING,
     POLL_DAY, POLL_TIME, TIMEZONE, TZ, ADMIN_ID,
     AUTO_PUBLISH, AUTO_PUBLISH_LABEL, AI_DAILY_LIMIT, NOTIFY_ADMIN, now_tz,
+    APPROVAL_TIMEOUT_HOURS, APPROVAL_REMINDERS,
 )
 import database
 from telegram_bot import create_and_send_post, create_and_send_poll, safe_send
@@ -110,6 +112,40 @@ async def job_weekly_poll(catch_up: bool = False):
         "weekly_poll", f"📊 Haftalik so'rovnoma ({POLL_DAY} {POLL_TIME})",
         create_and_send_poll, catch_up
     )
+
+
+# ===== TASDIQLANMAGAN POSTLARGA ESLATISH =====
+async def job_remind_pending():
+    """
+    AUTO_PUBLISH=false rejimida post kanalgacha tasdiqlashni kutadi.
+    Admin uzoq javob bermagan bo'lsa — eslatish yuboradi, shunda post
+    unutilib qolmaydi.
+    """
+    if not (APPROVAL_REMINDERS and NOTIFY_ADMIN):
+        return
+
+    try:
+        stale = await database.get_stale_pending_posts(APPROVAL_TIMEOUT_HOURS)
+    except Exception as e:
+        logger.warning("Tasdiqlanmagan postlarni tekshirib bo'lmadi: %s", e)
+        return
+
+    if not stale:
+        return
+
+    ids = ", ".join(f"#{p['id']}" for p in stale)
+    print(f"⏰ {len(stale)} ta post {APPROVAL_TIMEOUT_HOURS} soatdan beri "
+          f"tasdiqlanmagan: {ids}")
+    try:
+        await safe_send(
+            ADMIN_ID,
+            f"⏰ <b>{len(stale)} ta post tasdiqlashni kutmoqda</b>\n\n"
+            f"{html.escape(ids)}\n\n"
+            f"Ular {APPROVAL_TIMEOUT_HOURS} soatdan beri kutilmoqda.\n"
+            f"Ko'rish va tasdiqlash: <code>/pending</code>",
+        )
+    except Exception as e:
+        logger.warning("Eslatish yuborilmadi: %s", e)
 
 
 # ===== REAL VAQTDA BERILGAN VAZIFALAR =====
@@ -276,6 +312,17 @@ def setup_scheduler():
         id="status_log",
         replace_existing=True,
         name="💓 Status log",
+        max_instances=1,
+        coalesce=True,
+    )
+
+    # Tasdiqlanmagan postlarga eslatish (AUTO_PUBLISH=false rejimida muhim)
+    scheduler.add_job(
+        job_remind_pending,
+        IntervalTrigger(hours=1),
+        id="remind_pending",
+        replace_existing=True,
+        name="⏰ Tasdiqlanmagan postlarga eslatish",
         max_instances=1,
         coalesce=True,
     )

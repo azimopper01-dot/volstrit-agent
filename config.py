@@ -133,7 +133,7 @@ POLL_TIME = os.getenv("POLL_TIME", "10:00")
 # true  -> AI posti tayyor bo'lgach avtomatik kanalga chiqadi (tugmalar orqali
 #          admin keyinchroq o'chira/tuzata oladi)
 # false -> avval admonga yuboriladi, "Tasdiqlash" tugmasi bosilgach kanalga chiqadi
-AUTO_PUBLISH = _env_bool("AUTO_PUBLISH", True)
+AUTO_PUBLISH = _env_bool("AUTO_PUBLISH", False)
 NOTIFY_ADMIN = _env_bool("NOTIFY_ADMIN", True)
 MAX_POST_LENGTH = _env_int("MAX_POST_LENGTH", 4096)
 
@@ -157,6 +157,7 @@ DB_IS_PERSISTENT = DB_PATH.startswith("/data")
 
 # ===== XAVFSIZLIK =====
 APPROVAL_TIMEOUT_HOURS = _env_int("APPROVAL_TIMEOUT_HOURS", 2)
+APPROVAL_REMINDERS = _env_bool("APPROVAL_REMINDERS", True)
 
 
 # ===== TEKSHIRISH =====
