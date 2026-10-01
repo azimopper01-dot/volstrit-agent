@@ -243,3 +243,8 @@ statistika.
 | `ai_generator.py` | Gemini chaqiruvi, retry, kvota, zaxira matnlar |
 | `database.py` | Postlar, ish natijalari, AI kvota, real vaqt vazifalari |
 | `config.py` | Sozlamalar, vaqt mintaqasi, `.env` |
+
+
+---
+
+_2026-10-01: Railway Volume (/data) ulandi, DB_PATH doimiy qildi._
