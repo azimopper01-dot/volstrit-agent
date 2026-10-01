@@ -338,10 +338,31 @@ def setup_scheduler():
 
     print("✅ Scheduler sozlandi:")
     for job in scheduler.get_jobs():
-        nxt = getattr(job, "next_run_time", None)
-        when = f"{nxt:%Y-%m-%d %H:%M}" if nxt else "?"
         print(f"   • {job.name}")
-        print(f"       keyingi: {when} ({TIMEZONE})")
+    print("   ⏳ Aniq vaqtlar scheduler.start() dan keyin chiqariladi.")
+
+
+def print_next_runs():
+    """
+    Keyingi ish vaqtlarini chiqaradi.
+
+    Muhim: APScheduler'da `next_run_time` faqat `start()` dan keyin
+    to'lanadi — shuning uchun bu setup_scheduler() dan keyin
+    alohida chaqirilishi SHART.
+    """
+    print("⏰ KEYINGI ISHLAR VAQTLARI:")
+    rows = []
+    for job in scheduler.get_jobs():
+        nxt = getattr(job, "next_run_time", None)
+        if nxt is None:
+            continue
+        when = nxt.strftime("%Y-%m-%d %H:%M")
+        rows.append((nxt, f"   • {job.name}\n       keyingi: {when}"))
+    for _, line in sorted(rows):
+        print(line)
+    if not rows:
+        print("   (hech qanday ish rejalashtirilmagan)")
+    return rows
 
 
 def start_scheduler():
@@ -351,6 +372,8 @@ def start_scheduler():
     print("🚀 Scheduler ishga tushdi.")
     print(f"🌍 Vaqt mintaqasi: {TIMEZONE} | Hozir: {now_tz():%Y-%m-%d %H:%M:%S}")
     print(f"📤 Avtomatik kanalga yuborish: {AUTO_PUBLISH_LABEL}")
+    # next_run_time faqat start() dan keyin to'lanadi — shu sabab shu yerda
+    print_next_runs()
 
 
 async def notify_startup(next_runs: str):
@@ -379,8 +402,9 @@ def next_run_summary() -> str:
             continue
         nxt = getattr(job, "next_run_time", None)
         if nxt:
-            rows.append(f"   • {job.name} → {nxt:%H:%M}")
-    return "\n".join(sorted(rows, key=lambda s: s.split("→")[-1].strip()))
+            rows.append((nxt, f"   • {job.name} → {nxt:%Y-%m-%d %H:%M}"))
+    # vaqt bo'yicha tartiblash (cheklanmagan satrlar oxirida)
+    return "\n".join(line for _, line in sorted(rows, key=lambda r: r[0]))
 
 
 def stop_scheduler():
