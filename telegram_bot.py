@@ -20,7 +20,7 @@ from aiogram.types import (
     Message, CallbackQuery,
     InlineKeyboardMarkup, InlineKeyboardButton
 )
-from aiogram.client.default import DefaultRequestProperties
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 from aiogram.exceptions import (
@@ -47,14 +47,10 @@ logging.basicConfig(
 logger = logging.getLogger("telegram_bot")
 
 # Bot va Dispatcher
-# Standart timeout'lar juda past (5s) — Railway'da "Request timeout" beradi.
-bot = Bot(
-    token=BOT_TOKEN,
-    default=DefaultRequestProperties(
-        connect_timeout=TELEGRAM_CONNECT_TIMEOUT,
-        read_timeout=TELEGRAM_READ_TIMEOUT,
-    ),
-)
+# Timeout'ni oshiramiz: standart 60s yetarli, lekin Telegram sekin bo'lsa
+# "Request timeout" beradi. AiohttpSession orqali bitta umumiy timeout beriladi.
+session = AiohttpSession(timeout=TELEGRAM_READ_TIMEOUT)
+bot = Bot(token=BOT_TOKEN, session=session)
 
 dp = Dispatcher()
 router = Router()

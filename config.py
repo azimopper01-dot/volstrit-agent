@@ -95,7 +95,9 @@ TELEGRAM_SEND_RETRIES = _env_int("TELEGRAM_SEND_RETRIES", 4)
 
 # ===== AI (GEMINI) =====
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
-GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+# Eski "gemini-1.5-flash" 2026 da API dan olib tashlangan (404 beradi).
+# Hozirda mavjud va tez: gemini-3.7-flash
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.7-flash")
 GEMINI_TIMEOUT = _env_int("GEMINI_TIMEOUT", 120)
 GEMINI_MAX_OUTPUT_TOKENS = _env_int("GEMINI_MAX_OUTPUT_TOKENS", 1000)
 

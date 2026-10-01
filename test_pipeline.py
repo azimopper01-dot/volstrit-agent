@@ -78,8 +78,9 @@ class FakeCallback:
 
 
 class FakeBot:
-    def __init__(self, token=None, default=None):
+    def __init__(self, token=None, default=None, session=None):
         self.token = token
+        self.session = session
         self._mid = 100
 
     async def send_message(self, chat_id, text, **kw):
@@ -135,8 +136,11 @@ sys.modules["aiogram.types"] = types.SimpleNamespace(
     Message=object, CallbackQuery=object,
     InlineKeyboardMarkup=lambda **k: k, InlineKeyboardButton=lambda **k: k)
 sys.modules["aiogram.client"] = types.ModuleType("aiogram.client")
+sys.modules["aiogram.client.session"] = types.ModuleType("aiogram.client.session")
+sys.modules["aiogram.client.session.aiohttp"] = types.SimpleNamespace(
+    AiohttpSession=lambda **k: types.SimpleNamespace(timeout=k.get("timeout", 60)))
 sys.modules["aiogram.client.default"] = types.SimpleNamespace(
-    DefaultRequestProperties=lambda **k: types.SimpleNamespace(**k))
+    DefaultBotProperties=lambda **k: types.SimpleNamespace(**k))
 sys.modules["aiogram.filters"] = types.SimpleNamespace(Command=lambda *a, **k: None)
 sys.modules["aiogram.enums"] = types.SimpleNamespace(ParseMode=types.SimpleNamespace(HTML="HTML"))
 
@@ -174,8 +178,13 @@ class FakeModel:
         return types.SimpleNamespace(
             text=(
                 "🧪 TEST POST\n\n"
-                "Bu suniy matn. <b>HTML teglari</b> & ampersand.\n"
-                "Savol: nimaga yoqdi? #fond #test"
+                "Bu suniy matn va u yetarli uzunlikda bo'lishi kerak, "
+                "aks holda tizim uni 'prompt qaytardi' deb rad etadi. "
+                "<b>HTML teglari</b> va & ampersand ham ataylab qo'yilgan — "
+                "ular tozalanishi kerak.\n\n"
+                "💡 Maslahat: test matnida ham haqiqiydek struktura bo'lsin.\n\n"
+                "Savol: nimaga yoqdi?\n\n"
+                "#fond #aksiya #forex #kripto"
             )
         )
 
@@ -329,14 +338,61 @@ async def main():
                     "429 Resource has been exhausted. Please retry in 28.3s. "
                     "quota_id: GenerateRequestsPerMinutePerProjectPerModel-FreeTier"
                 )
-            return types.SimpleNamespace(text="Retry muvaffaqiyatli javob berdi.")
+            # haqiqiy postga o'xshash, 250+ belgi (himoya o'tsin)
+            return types.SimpleNamespace(
+                text="Retry muvaffaqiyatli javob berdi.\n\n"
+                     "Birja bugun sekin ochildi, lekin hajmi past. "
+                     "Ko'pchilik ertalabki tebranishni signal deb oladi, "
+                     "bu esa noto'g'ri qarorga olib keladi.\n\n"
+                     "💡 Maslahat: rejangizni oldindan yozib qo'ying.\n\n"
+                     "Sizningcha ertalabki tebranish ishonchli signalmi?\n\n"
+                     "#fond #aksiya #forex #kripto")
 
     ai.model = RateModel()
     ai.AI_RETRY_BASE_DELAY = 0
     ai.AI_MAX_RETRY_WAIT = 1
+    ai.AI_MAX_RETRIES = 3
+    SENT.clear()
     pid3 = await tg.create_and_send_post(post_type="morning")
+    row3 = await database.get_post(pid3)
+    await tg.cb_approve(FakeCallback(f"approve_{pid3}", config.ADMIN_ID))
+    row3 = await database.get_post(pid3)
     check("429 dan keyin qayta urib muvaffaqiyatli bo'ldi",
-          "Retry muvaffaqiyatli" in (await database.get_post(pid3))["content"])
+          "Retry muvaffaqiyatli" in row3["content"])
+    check("...va haqiqiy post kanalga chiqdi",
+          row3["status"] == "sent", row3["status"])
+
+    # ---------- 6b. AI promptni o'zini qaytarsa ----------
+    print("\n6️⃣b AI prompt matnini qaytarsa — qayta urinadi, oxirida zaxira")
+    class BadModel:
+        """Har doim promptni o'zini qaytaradi."""
+        def __init__(self, name=None):
+            pass
+
+        def generate_content(self, prompt, **kw):
+            CALLS["generate"] += 1
+            return types.SimpleNamespace(
+                text="QOIDALAR:\n1. Post 500-900 belgi\n2. Emoji 3-5 ta\n\nChecked."
+            )
+
+    ai.model = BadModel()
+    ai.AI_MAX_RETRIES = 2
+    SENT.clear()
+    ai.model = BadModel()
+    ai.AI_MAX_RETRIES = 2
+    pid4 = await tg.create_and_send_post(post_type="evening")
+    row4 = await database.get_post(pid4)
+    content = row4["content"]
+    check("prompt-qaytari aniqlanib rad etildi (Checked. yo'q)",
+          "Checked" not in content and "QOIDALAR" not in content)
+    # AUTO_PUBLISH=false: avval tasdiqlash, keyin kanalga
+    SENT.clear()
+    await tg.cb_approve(FakeCallback(f"approve_{pid4}", config.ADMIN_ID))
+    row4 = await database.get_post(pid4)
+    check("zaxira matn tasdiqdan keyin kanalga chiqadi (yo'qolmadi)",
+          row4["status"] == "sent" and to_channel(), row4["status"])
+    ai.model = FakeModel()
+    ai.AI_MAX_RETRIES = 3
 
     # ---------- 7. ADMIN TUGMALARI ----------
     print("\n7️⃣  Admin tugmalari: Tasdiqlash / Rad etish / O'chirish")

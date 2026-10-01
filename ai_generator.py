@@ -14,6 +14,7 @@ import asyncio
 import html
 import random
 import re
+from typing import Optional
 
 import google.generativeai as genai
 from google.api_core.exceptions import ResourceExhausted, GoogleAPIError
@@ -53,39 +54,35 @@ GEN_CONFIG = {
 
 
 # ===== TIZIM PROMPTI =====
-SYSTEM_PROMPT = f"""Sen "{CHANNEL_NAME}" nomli Telegram kanal uchun professional SMM menejersan.
+# Muhim: qoidalar qisqa va aniq. Uzun ro'yxatli promptlarda model
+# promptni o'zini qaytarib beradi ("Checked.", "1. Post 600-900 belgi").
+SYSTEM_PROMPT = f"""Sen "{CHANNEL_NAME}" Telegram kanalining SMM menyasisan.
 
-KANAL HAQIDA:
-- Mavzu: {CHANNEL_TOPIC}
-- Til: {CHANNEL_LANG} (o'zbek tili, lotin yozuvida)
-- Uslub: {CHANNEL_STYLE}
-- Auditoriya: {AUDIENCE} (ham yangi boshlovchilar, ham tajribalilar)
+Kanal: {CHANNEL_TOPIC}
+Til: o'zbek tili, lotin yozuvi
+Auditoriya: {AUDIENCE} — yangi va tajribali investorlar
+Uslub: sodda, tushunarli, ilhomlantiruvchi
 
-VAZIFANG:
-Fond bozori haqida qisqa, qiziqarli va foydali post yozish.
+Yagona vazifang: tayyor Telegram post matnini yozish.
 
-QOIDALAR:
-1. Post {MAX_POST_LENGTH - 800}-{MAX_POST_LENGTH - 1500} belgidan oshmasin
-2. Sodda va tushunarli tilda yozing — murakkab atamalarni izohlang
-3. Har bir postda kamida 1 ta amaliy maslahat yoki tahlil bo'lsin
-4. Emoji ishlatilsin, lekin me'yorida (3-5 ta)
-5. Oxirida 3-4 ta hashtag qo'ying: #fond #aksiya #forex #kripto kabi
-6. Hech qachon aniq "sotib oling" yoki "soting" deb maslahat bermang —
-   bu moliyaviy maslahat hisoblanadi
-7. Raqamlar va faktlar ishonchli bo'lsin
-8. Savol bilan tugating — obunachilarni fikr bildirishga severance
-9. HTML teglar (<b>, <i>, <a>) ISHLATMA — bu Telegram'ni buzadi
-10. "&", "<", ">" belgilaridan foydalanma
+Post qanday bo'lishi kerak:
+- Birinchi qator: qisqa, e'tiborni tortuvchi sarlavha (emoji bilan)
+- Keyin: 2-3 qator asosiy ma'lumot yoki kuzatish
+- Keyin: bitta amaliy maslahat yoki xulosa
+- Oxirida: obunachiga savol
+- Oxirida: 3-4 ta hashtag (#fond #aksiya #forex #kripto)
 
-POST TUZILISHI:
-- Sarlavha (qisqa, e'tiborni tortuvchi)
-- Asosiy ma'lumot (2-3 paragraf)
-- Amaliy maslahat yoki xulosa
-- Savol
-- Hashtaglar
+Yodingizda tuting:
+- Matn 500-900 belgi orasida bo'lsin
+- Murakkab atamalarni oddiy tilda izohlang
+- Emoji 3-5 ta, keragidan ko'p emas
+- "Sotib oling" yoki "soting" deb aniq maslahat bermang
+- HTML teglari va ampersand belgisini ishlatmang
+- Raqamlar va faktlar ishonchli bo'lsin
 
-FAQAT POST MATNINI QAYTARING. Hech qanday izoh, tushuntirish yoki
-qo'shimcha matn yozmang."""
+Javobingiz: FAQAT tayyor post matni.
+Bu yerda hech qanday izoh, tushuntirish, ro'yxat yoki "Checked" kabi
+so'zlar yozilmaydi — ular yozilsa, javob noto'g'ri hisoblanadi."""
 
 
 # ===== POST MAVZULARI (navbatma-navbat ishlatiladi) =====
@@ -256,6 +253,31 @@ def _fallback(post_type: str, reason: str = "") -> str:
     return text
 
 
+def _looks_like_garbage(text: str, min_len: int = 250) -> bool:
+    """
+    AI promptning o'zini yoki ro'yxatni qaytarganini aniqlaydi.
+
+    Sabab: ba'zi modellar "Checked." / "1. Post 600-900 belgi" kabi
+    prompt matnini qaytaradi — bu kanalga chiqsa obuna buziladi.
+    """
+    if not text:
+        return True
+    t = text.strip()
+    if len(t) < min_len:
+        return True
+    if re.match(r"^(checked|done|ok|ready)\b[\.\s]*$", t, re.IGNORECASE):
+        return True
+    if re.search(r"POST TUZILISHI|QOIDALAR:|JUDA MUHIM", t):
+        return True
+    lines = [x for x in t.split("\n") if x.strip()]
+    if lines:
+        bullets = sum(1 for x in lines
+                      if x.strip().startswith(("*", "-", "1.", "2.", "3.")))
+        if bullets > len(lines) * 0.7:
+            return True
+    return False
+
+
 def _clean(text: str) -> str:
     """HTML teglari, Telegram limitidan uzun matn va bo'sh joylarni tozalaydi."""
     if not text:
@@ -327,6 +349,15 @@ async def _call_with_retry(prompt: str, label: str) -> str:
             if not text:
                 raise TransientAIError("AI bo'sh javob qaytardi")
 
+            # AI promptni o'zini qaytargan bo'lsa — qayta uramiz
+            # (poll uchun matn tabiiy qisqa, shuning uchun chegarasi boshqa)
+            min_len = 80 if label == "poll" else 250
+            if _looks_like_garbage(text, min_len=min_len):
+                await database.record_ai_call(False, "bad_output")
+                raise TransientAIError(
+                    "AI prompt matnini qaytardi (post emas)"
+                )
+
             await database.record_ai_call(True, label)
             print(f"   🤖 AI [{label}] muvaffaqiyatli (urinish {attempt})")
             return text
@@ -381,11 +412,10 @@ async def generate_post(topic: str = None, post_type: str = "morning") -> str:
 
     prompt = f"""{SYSTEM_PROMPT}
 
-BUGUNGI MAVZU: {topic}
+Bu postning mavzusi: {topic}
+Bu postning turi: {time_context}
 
-QO'SHIMCHA KO'RSATMA: {time_context}
-
-Endi yuqoridagi qoidalarga muvofiq post yozing."""
+Shu mavzu bo'yicha tayyor post matnini yoz."""
 
     try:
         text = await _call_with_retry(prompt, f"post/{post_type}")
@@ -401,9 +431,9 @@ async def generate_post_for_topic(topic: str) -> str:
     """Aniq mavzu bo'yicha post (real vaqtda berilgan vazifa uchun)."""
     prompt = f"""{SYSTEM_PROMPT}
 
-BUGUNGI MAVZU: {topic}
+Bu postning mavzusi: {topic}
 
-Endi yuqoridagi qoidalarga muvofiq post yozing."""
+Shu mavzu bo'yicha tayyor post matnini yoz."""
 
     try:
         text = await _call_with_retry(prompt, "post/adhoc")
@@ -422,24 +452,18 @@ async def generate_poll() -> Optional[dict]:
     prompt = f"""Sen "{CHANNEL_NAME}" Telegram kanali uchun so'rovnoma tuzuvchisan.
 
 Kanal mavzusi: {CHANNEL_TOPIC}
-Til: o'zbek tili (lotin)
+Til: o'zbek tili, lotin yozuvi
 
-VAZIFA: Fond bozori haqida qiziqarli so'rovnoma tuzing.
+Savol qisqa va aniq bo'lsin (60 belgidan oshmasin).
+Unda 3-5 ta javob variant bo'lsin, har biri 30 belgidan oshmasin.
+Savol obunachilarni fikr bildirishga undasin va mavzu dolzarb bo'lsin.
 
-QOIDALAR:
-1. Savol qisqa va aniq bo'lsin (60 belgidan oshmasin)
-2. 3-5 ta javob varianti bo'lsin
-3. Har bir variant 30 belgidan oshmasin
-4. Savol obunachilarni fikr bildirishga undasin
-5. Mavzu dolzarb bo'lsin
-6. HTML teglari va "&" belgisidan foydalanma
-
-JAVOBNI FAQAT QUYIDAGI FORMATDA QAYTARING (boshqa hech narsa yozmang):
-SAVOL: <savol matni>
-VARIANT: <1-variant>
-VARIANT: <2-variant>
-VARIANT: <3-variant>
-VARIANT: <4-variant>"""
+Javobni faqat shu formatda yoz, boshqa hech narsa emas:
+SAVOL: <savol>
+VARIANT: <birinchi variant>
+VARIANT: <ikkinchi variant>
+VARIANT: <uchinchi variant>
+VARIANT: <to'rtinchi variant>"""
 
     try:
         text = await _call_with_retry(prompt, "poll")
@@ -452,8 +476,14 @@ VARIANT: <4-variant>"""
             elif line.startswith("VARIANT:"):
                 options.append(line.replace("VARIANT:", "").strip())
 
+        # AI ko'pincha "<savol>" shablonini qaytaradi — buni rad etamiz
         if not question or len(options) < 2:
             raise TransientAIError("AI noto'g'ri format qaytardi")
+        if "<" in question or question.lower().startswith("<savol"):
+            raise TransientAIError("AI shablon qaytardi, haqiqiy savol emas")
+        options = [o for o in options if o and not o.startswith("<")]
+        if len(options) < 2:
+            raise TransientAIError("AI variantlari bo'sh")
         return {"question": question, "options": options[:10]}
 
     except Exception as e:
