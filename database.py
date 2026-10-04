@@ -87,6 +87,16 @@ async def init_db():
             )
         """)
 
+        # Rasmlar uchun alohida kvota (matndan alohida hisoblanadi)
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS image_usage (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                ts TEXT NOT NULL,
+                success INTEGER DEFAULT 1,
+                note TEXT
+            )
+        """)
+
         # Real vaqtda berilgan bir martalik vazifalar (/schedule)
         await db.execute("""
             CREATE TABLE IF NOT EXISTS adhoc_tasks (
@@ -294,6 +304,29 @@ async def ai_used_last_minute() -> int:
 async def prune_ai_usage(keep_days: int = 7):
     await _execute(
         "DELETE FROM ai_usage WHERE ts < datetime('now', ?)",
+        (f"-{keep_days} days",)
+    )
+
+
+# ===== RASM KVOTA HISOBI =====
+async def record_image_call(success: bool = True, note: str = ""):
+    await _execute(
+        "INSERT INTO image_usage (ts, success, note) VALUES (?, ?, ?)",
+        (now_iso(), 1 if success else 0, (note or "")[:200])
+    )
+
+
+async def ai_used_images_today() -> int:
+    row = await _query_one(
+        "SELECT COUNT(*) AS c FROM image_usage WHERE success = 1 AND DATE(ts) = ?",
+        (today_str(),)
+    )
+    return row["c"] if row else 0
+
+
+async def prune_image_usage(keep_days: int = 7):
+    await _execute(
+        "DELETE FROM image_usage WHERE ts < datetime('now', ?)",
         (f"-{keep_days} days",)
     )
 

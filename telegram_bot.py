@@ -36,8 +36,11 @@ from config import (
     POST_TIME_EVENING, POLL_DAY, POLL_TIME, AI_DAILY_LIMIT,
 )
 import database
+from aiogram.types import BufferedInputFile
+
 from ai_generator import (
-    generate_post, generate_post_for_topic, generate_poll, improve_post
+    generate_post, generate_post_for_topic, generate_poll, improve_post,
+    _pick_topic,
 )
 
 logging.basicConfig(
@@ -95,6 +98,39 @@ async def safe_send(chat_id: int | str, text: str, **kwargs):
             await asyncio.sleep(min(2 ** attempt, 10))
 
     raise last if last else RuntimeError("yuborilmadi")
+
+
+async def safe_send_photo(chat_id: int | str, image_bytes: bytes,
+                          caption: str = "", **kwargs):
+    """
+    Rasmli xabar yuboradi. Xato bo'lsa — rasmni tashlab, matnni yuboradi.
+    Post hech qachon yo'qolmaydi.
+    """
+    photo = BufferedInputFile(image_bytes, filename="post.png")
+    last = None
+    for attempt in range(1, TELEGRAM_SEND_RETRIES + 1):
+        try:
+            cap = caption[:1024] if caption else ""
+            return await bot.send_photo(
+                chat_id=chat_id, photo=photo, caption=cap, **kwargs
+            )
+        except TelegramRetryAfter as e:
+            wait = min(int(e.retry_after or 5) + 1, 60)
+            logger.warning("Photo flood control: %ss kutamiz (%s)", wait, attempt)
+            last = e
+            await asyncio.sleep(wait)
+        except (TelegramBadRequest, TelegramNetworkError, TelegramForbiddenError) as e:
+            logger.warning("Rasm yuborilmadi (%s): %s", attempt, e)
+            last = e
+            break  # rasm muammosi — darhol matnni yuboramiz
+        except Exception as e:
+            logger.warning("Rasm yuborishda noaniq xato (%s): %s", attempt, e)
+            last = e
+            break
+
+    # Rasm chiqmadi — hech bo'lmasa matnni yuboramiz
+    logger.warning("Rasmni yuborib bo'lmadi, faqat matn yuboriladi: %s", last)
+    return await safe_send(chat_id, caption)
 
 
 # ===== KLAVIATURALAR =====
@@ -341,31 +377,41 @@ async def cmd_health(message: Message):
 
 
 # ===== POST YARATISH =====
-async def create_and_send_post(post_type: str = "morning", topic: str = None) -> int:
+async def create_and_send_post(post_type: str = "morning", topic: str = None,
+                               used_topics: set = None) -> int:
     """
-    Post yaratadi va KANALGA yuboradi (AUTO_PUBLISH= True bo'lsa).
-    Adminga ko'rish uchun nusxa va boshqaruv tugmalari yuboriladi.
+    Post yaratadi (AI matn + rasm) va KANALGA yuboradi.
+
+    AUTO_PUBLISH=True  -> darhol kanalga
+    AUTO_PUBLISH=False -> avval admonga, "Tasdiqlash"dan keyin kanalga
     """
     if topic:
         content = await generate_post_for_topic(topic)
+        image = None
     else:
-        content = await generate_post(post_type=post_type)
+        res = await generate_post(post_type=post_type, used_topics=used_topics)
+        content = res["content"]
+        image = res.get("image")
 
     post_id = await database.save_post(content=content, topic=post_type)
 
     sent = None
     if AUTO_PUBLISH:
         try:
-            # Kanalga xom (parse_mode'siz) matn — HTML xatolarining oldi olindi
-            sent = await safe_send(CHANNEL_ID, content)
+            if image:
+                sent = await safe_send_photo(CHANNEL_ID, image, content)
+            else:
+                # Kanalga xom (parse_mode'siz) matn — HTML xatolarining oldi olindi
+                sent = await safe_send(CHANNEL_ID, content)
             await database.update_post_status(
                 post_id, "sent", message_id=sent.message_id
             )
-            print(f"✅ Post #{post_id} kanalga yuborildi (msg={sent.message_id})")
+            has_img = "ha" if image else "yo'q"
+            print(f"✅ Post #{post_id} kanalga yuborildi "
+                  f"(msg={sent.message_id}, rasm={has_img})")
         except Exception as e:
             logger.exception("Kanalga yuborish muvaffaqiyatsiz")
             await database.update_post_status(post_id, "pending", error=str(e))
-            # Kanalga chiqolmagan bo'lsa, tasdiqlashga qoldiramiz
             if NOTIFY_ADMIN:
                 await safe_send(
                     ADMIN_ID,
@@ -452,13 +498,30 @@ async def cb_approve(callback: CallbackQuery):
         return await callback.answer("⚠️ Bu post allaqachon yuborilgan", show_alert=True)
 
     try:
-        sent = await safe_send(CHANNEL_ID, post["content"])
+        # Tasdiqlashda rasm yaratamiz (AI kvota yo'q bo'lsa rasmsiz chiqadi)
+        image = None
+        try:
+            from ai_generator import generate_image, _pick_topic
+            topic = post["topic"] or _pick_topic()
+            res = await generate_image(topic)
+            image = res[0] if isinstance(res, tuple) else res
+        except Exception as ie:
+            logger.warning("Tasdiqlashda rasm yaratilmadi: %s", ie)
+
+        if image:
+            sent = await safe_send_photo(CHANNEL_ID, image, post["content"])
+        else:
+            sent = await safe_send(CHANNEL_ID, post["content"])
+
         await database.update_post_status(post_id, "sent", message_id=sent.message_id)
         try:
             await callback.message.edit_reply_markup(reply_markup=published_keyboard(post_id))
         except TelegramBadRequest:
             pass
-        await callback.message.answer(f"✅ Post #{post_id} kanalga muvaffaqiyatli yuborildi!")
+        tail = " 🎨" if image else ""
+        await callback.message.answer(
+            f"✅ Post #{post_id} kanalga muvaffaqiyatli yuborildi{tail}!"
+        )
         await callback.answer("✅ Yuborildi!")
     except Exception as e:
         logger.exception("Tasdiqlashda xatolik")

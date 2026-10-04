@@ -86,24 +86,37 @@ async def _run_job(job_id: str, label: str, coro_factory, catch_up: bool = False
 
 
 # ===== KUNLIK ISHLAR =====
+# Muhim: bir kunda 3 ta post bo'ladi. Har biriga ALHIDDA mavzu beriladi —
+# aks holda uchala post bir xil mavzuda chiqib, kanal zerikarli bo'ladi.
+_USED_TOPICS: set = set()
+
+
+def _reset_topics():
+    global _USED_TOPICS
+    _USED_TOPICS = set()
+
+
 async def job_morning_post(catch_up: bool = False):
     return await _run_job(
         "morning_post", f"🌅 Ertalabki post ({POST_TIME_MORNING})",
-        lambda: create_and_send_post(post_type="morning"), catch_up
+        lambda: create_and_send_post(post_type="morning", used_topics=_USED_TOPICS),
+        catch_up
     )
 
 
 async def job_noon_post(catch_up: bool = False):
     return await _run_job(
         "noon_post", f"☀️ Tushlikdagi post ({POST_TIME_NOON})",
-        lambda: create_and_send_post(post_type="noon"), catch_up
+        lambda: create_and_send_post(post_type="noon", used_topics=_USED_TOPICS),
+        catch_up
     )
 
 
 async def job_evening_post(catch_up: bool = False):
     return await _run_job(
         "evening_post", f"🌆 Kechki post ({POST_TIME_EVENING})",
-        lambda: create_and_send_post(post_type="evening"), catch_up
+        lambda: create_and_send_post(post_type="evening", used_topics=_USED_TOPICS),
+        catch_up
     )
 
 
@@ -114,7 +127,27 @@ async def job_weekly_poll(catch_up: bool = False):
     )
 
 
-# ===== TASDIQLANMAGAN POSTLARGA ESLATISH =====
+# ===== KUNLIK TOZALASH VA ESLATISH =====
+async def _daily_cleanup():
+    """Eski AI va rasm hisoblarini tozalash."""
+    try:
+        await database.prune_ai_usage()
+        await database.prune_image_usage()
+    except Exception as e:
+        logger.warning("Tozalashda xato: %s", e)
+
+
+async def job_new_day_reset():
+    """
+    Har kuni 00:05 da ishlatilgan mavzular ro'yxatini tozalaydi.
+
+    Aks holda bir necha kundan keyin barcha mavzular "ishlatilgan"
+    bo'lib qoladi va yana takrorlanish boshlanadi.
+    """
+    _reset_topics()
+    print(f"🔄 Yangi kun — mavzular ro'yxati tozalandi ({now_tz():%Y-%m-%d})")
+
+
 async def job_remind_pending():
     """
     AUTO_PUBLISH=false rejimida post kanalgacha tasdiqlashni kutadi.
@@ -329,11 +362,23 @@ def setup_scheduler():
 
     # Eski AI hisoblarini tozalash
     scheduler.add_job(
-        database.prune_ai_usage,
+        _daily_cleanup,
         IntervalTrigger(hours=24),
         id="cleanup",
         replace_existing=True,
         name="🧹 Tozalash",
+    )
+
+    # Har kuni 00:05 da mavzular ro'yxatini tozalash (takrorlanmaslik uchun)
+    scheduler.add_job(
+        job_new_day_reset,
+        CronTrigger(hour=0, minute=5, timezone=TZ),
+        id="daily_reset",
+        replace_existing=True,
+        name="🔄 Yangi kun — mavzularni tozalash",
+        misfire_grace_time=3600,
+        coalesce=True,
+        max_instances=1,
     )
 
     print("✅ Scheduler sozlandi:")

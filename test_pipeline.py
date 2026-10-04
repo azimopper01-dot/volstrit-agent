@@ -44,8 +44,10 @@ os.environ["POLL_TIME"] = "10:00"
 # ---------- TELEGRAM STUB ----------
 SENT = []          # (chat_id, text)
 DELETED = []       # (chat_id, message_id)
-CALLS = {"generate": 0}
+PHOTOS = []        # (chat_id, image_bytes)
+CALLS = {"generate": 0, "image": 0}
 QUOTA_MODE = {"on": False}
+IMAGE_MODE = {"on": True}
 
 
 class FakeMsg:
@@ -86,6 +88,12 @@ class FakeBot:
     async def send_message(self, chat_id, text, **kw):
         self._mid += 1
         SENT.append((chat_id, text))
+        return FakeMsg(self._mid)
+
+    async def send_photo(self, chat_id, photo=None, caption="", **kw):
+        self._mid += 1
+        SENT.append((chat_id, caption))
+        PHOTOS.append((chat_id, getattr(photo, "data", b"")))
         return FakeMsg(self._mid)
 
     async def send_poll(self, chat_id, question, options, **kw):
@@ -134,6 +142,8 @@ sys.modules["aiogram"] = types.SimpleNamespace(
 )
 sys.modules["aiogram.types"] = types.SimpleNamespace(
     Message=object, CallbackQuery=object,
+    BufferedInputFile=lambda data=None, filename="f": types.SimpleNamespace(
+        data=data, filename=filename),
     InlineKeyboardMarkup=lambda **k: k, InlineKeyboardButton=lambda **k: k)
 sys.modules["aiogram.client"] = types.ModuleType("aiogram.client")
 sys.modules["aiogram.client.session"] = types.ModuleType("aiogram.client.session")
@@ -192,6 +202,26 @@ class FakeModel:
 sys.modules["google"] = types.ModuleType("google")
 sys.modules["google.generativeai"] = types.SimpleNamespace(
     configure=lambda **k: None, GenerativeModel=lambda name=None: FakeModel(name))
+
+# ---------- RASM STUB ----------
+FAKE_PNG = b"\x89PNG\r\n\x1a\n" + b"0" * 200   # PNG sarlavhasi (soxta)
+
+
+class FakeImageModel:
+    def __init__(self, name=None):
+        self.name = name
+
+    def generate_content(self, prompt, **kw):
+        CALLS["image"] += 1
+        return types.SimpleNamespace(
+            candidates=[types.SimpleNamespace(
+                content=types.SimpleNamespace(parts=[
+                    types.SimpleNamespace(
+                        inline_data=types.SimpleNamespace(
+                            data=FAKE_PNG, mime_type="image/png"))
+                ])
+            )]
+        )
 sys.modules["google.api_core"] = types.ModuleType("google.api_core")
 sys.modules["google.api_core.exceptions"] = types.SimpleNamespace(
     ResourceExhausted=_Rsrc, GoogleAPIError=_ApiErr)
@@ -203,6 +233,11 @@ import config
 import scheduler as sch
 import telegram_bot as tg
 import ai_generator as ai
+
+# rasm modelini stub bilan almashtiramiz
+ai._get_image_model = lambda: FakeImageModel()
+ai.IMAGE_ENABLED = True
+ai.AI_IMAGE_DAILY_LIMIT = 50
 
 OK, FAIL = "✅", "❌"
 results = []
@@ -468,6 +503,71 @@ async def main():
     check("kanalga yuborilgan (tasdiqlangan)", s["total_sent"] >= 1, f"{s['total_sent']}")
     check("rad etilgan", s["rejected"] >= 1, f"{s['rejected']}")
     check("tasdiqlash kutilmoqda", s["pending"] >= 1, f"{s['pending']}")
+
+    # ---------- 11. TAKRORLANMASLIK ----------
+    print("\n" + "1️⃣1️⃣ Mavzular takrorlanmasligi")
+    seen = []
+    used_t = set()
+    for _ in range(10):
+        tp = ai._pick_topic("morning", used_t)
+        nm = tp.split(" — ")[0]
+        used_t.add(nm)
+        seen.append(nm)
+    check("mavzular soni kengaygan (>=35)", len(ai.POST_TOPICS) >= 35,
+          f"{len(ai.POST_TOPICS)} ta")
+    check("10 ta ketma-ket mavzudan kamida 9 noyob",
+          len(set(seen)) >= 9, f"{len(set(seen))} noyob / 10")
+    check("mavzular 3 ta kishilik har xil burchakka ega",
+          all(" — " in ai._pick_topic("morning", set()) for _ in range(3)))
+
+    # ---------- 12. RASM ----------
+    print("\n1️⃣2️⃣ Rasm yaratish va yuborish")
+    SENT.clear()
+    PHOTOS.clear()
+    CALLS["image"] = 0
+    rp = await tg.create_and_send_post(post_type="morning")
+    check("AI rasm yaratishga murojaat qildi", CALLS["image"] >= 1,
+          f"{CALLS['image']} marta")
+    # AUTO_PUBLISH=false -> kanalga chiqish tasdiqlashdan keyin
+    check("AUTO_PUBLISH=false: kanalga hali chiqmadi", len(PHOTOS) == 0)
+    SENT.clear()
+    PHOTOS.clear()
+    await tg.cb_approve(FakeCallback(f"approve_{rp}", config.ADMIN_ID))
+    check("tasdiqlashda rasm kanalga yuborildi", len(PHOTOS) >= 1,
+          f"{len(PHOTOS)} ta rasm")
+    check("rasm ma'lumotlari to'g'ri",
+          PHOTOS and PHOTOS[0][1].startswith(b"\x89PNG"),
+          repr(PHOTOS[0][1][:8]) if PHOTOS else "yo'q")
+    check("post 'sent' holatida",
+          (await database.get_post(rp))["status"] == "sent")
+
+    # kvota tugsa — post rasmsiz, lekin chiqishi kerak
+    print("\n1️⃣2️⃣b Rasm kvota tugasa — post rasmsiz chiqadi")
+    ai.AI_IMAGE_DAILY_LIMIT = 0
+    SENT.clear()
+    PHOTOS.clear()
+    qp = await tg.create_and_send_post(post_type="noon")
+    row_q = await database.get_post(qp)
+    check("post yana ham yaratildi", row_q is not None)
+    check("rasm yuborilmadi (kvota)", len(PHOTOS) == 0)
+    check("...lekin matn adminga yuborildi", to_admin(), row_q["status"])
+    ai.AI_IMAGE_DAILY_LIMIT = 50
+
+    # ---------- 13. RASM XATOSI ----------
+    print("\n1️⃣3️⃣ Rasm yaratilmasa — post chiqishda davom etadi")
+
+    def broken_model():
+        raise ai.TransientAIError("rasm modeli ishlayapti")
+
+    ai._get_image_model = broken_model
+    SENT.clear()
+    PHOTOS.clear()
+    bp = await tg.create_and_send_post(post_type="evening")
+    row_b = await database.get_post(bp)
+    check("rasm xatosi postni to'xtatmadi", row_b is not None and to_admin(),
+          row_b["status"])
+    check("post rasmsiz yuborildi", len(PHOTOS) == 0)
+    ai._get_image_model = lambda: FakeImageModel()
 
     # ---------- NATIJA ----------
     print("\n" + "=" * 68)

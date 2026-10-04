@@ -109,6 +109,14 @@ AI_DAILY_LIMIT = _env_int("AI_DAILY_LIMIT", 14)
 AI_MINUTE_LIMIT = _env_int("AI_MINUTE_LIMIT", 4)
 AI_MAX_RETRY_WAIT = _env_int("AI_MAX_RETRY_WAIT", 90)
 
+# ===== RASMLAR (postga ilova) =====
+# AI kvota rasmlar uchun alohida hisoblanadi, shuning uchun past chegara qo'yamiz.
+IMAGE_ENABLED = _env_bool("IMAGE_ENABLED", True)
+IMAGE_MODEL = os.getenv("IMAGE_MODEL", "gemini-2.5-flash-image")
+IMAGE_QUALITY = os.getenv("IMAGE_QUALITY", "1024x1024")
+AI_IMAGE_DAILY_LIMIT = _env_int("AI_IMAGE_DAILY_LIMIT", 8)
+IMAGE_TIMEOUT = _env_int("IMAGE_TIMEOUT", 90)
+
 
 # ===== KANAL SOZLAMALARI =====
 CHANNEL_NAME = os.getenv("CHANNEL_NAME", "Volstrit uchun start")

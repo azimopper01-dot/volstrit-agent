@@ -24,6 +24,8 @@ from config import (
     AI_MAX_RETRIES, AI_RETRY_BASE_DELAY, AI_DAILY_LIMIT, AI_MINUTE_LIMIT,
     AI_MAX_RETRY_WAIT, CHANNEL_NAME, CHANNEL_TOPIC, CHANNEL_LANG,
     CHANNEL_STYLE, AUDIENCE, MAX_POST_LENGTH, now_tz,
+    IMAGE_ENABLED, IMAGE_MODEL, IMAGE_QUALITY, AI_IMAGE_DAILY_LIMIT,
+    IMAGE_TIMEOUT,
 )
 import database
 
@@ -85,18 +87,70 @@ Bu yerda hech qanday izoh, tushuntirish, ro'yxat yoki "Checked" kabi
 so'zlar yozilmaydi — ular yozilsa, javob noto'g'ri hisoblanadi."""
 
 
-# ===== POST MAVZULARI (navbatma-navbat ishlatiladi) =====
+# ===== POST MAVZULARI (har kunda takrorlanmaydigan qilib) =====
+# Muhim: mavzular kengaytirilgan va ularga "yo'nalish" (angle) qo'shildi.
+# Bitta kun ichida ham, kunlar o'tsa ham mavzu takrorlanmasligi kerak —
+# aks holda kanal bir xil ko'rinadi.
+# (topic, angle) — angle matnning burchagini belgilaydi.
 POST_TOPICS = [
-    "Kunlik bozor yangiliklari: asosiy indekslar va valyuta kurslari",
-    "Bitta aksiya tahlili: mashhur kompaniya misolida",
-    "Kripto bozori: Bitcoin va Ethereum holati",
-    "Forex: asosiy valyuta juftliklari tahlili",
-    "Boshlovchilar uchun: fond bozoriga qanday kirish mumkin",
-    "Riskni boshqarish: portfelni diversifikatsiya qilish sirlari",
-    "Neft va oltin narxlari: nima bo'lyapti?",
-    "Kompaniya hisobotlari: nimalarga e'tibor berish kerak",
-    "Uzoq muddatli investitsiya strategiyalari",
-    "Bozor psixologiyasi: qo'rquv va ochko'zlik",
+    ("Kunlik bozor yangiliklari", "asosiy indekslar va valyuta kurslaridagi o'zgarishlarga qisqa tahlil"),
+    ("Bitta aksiya tahlili", "mashhur kompaniyaning kuchli tomonlari va xavflarini taqqoslash"),
+    ("Kripto bozori", "Bitcoin va Ethereum narxlarining ehtimoliy yo'nalishi"),
+    ("Forex asoslari", "eng ko'p savdodagi valyuta juftliklarining o'zaro aloqasi"),
+    ("Birinchi qadam", "boshlovchilar uchun fond bozoriga xavfsizroq kirish yo'li"),
+    ("Diversifikatsiya", "portfelni sohalar bo'yicha taqsimlashning oddiy qoidalari"),
+    ("Neft va oltin", "tinchlik davri narxlari nima uchun o'zgaradi"),
+    ("Hisobotlar tahlili", "kompaniya hisobotida qaysi qatorlarga qaratish kerak"),
+    ("Uzoq muddatli strategiya", "foiz va barchaga e'tiborsiz qoldirishning farqi"),
+    ("Bozor psixologiyasi", "qalboviy hissiyot qachon xato qarorga olib keladi"),
+    ("Likvidlik tushunchasi", "bitta aksiyaning narxi nima uchun keskin sakraydi"),
+    ("Dividendlar", "ulushli aksiyalar qanday ishlaydi va nimalarga e'tibor berish kerak"),
+    ("Texnikal ko'rsatkichlar", "qisqa muddatli signalda nimani tekshirish kerak"),
+    ("Xalqaro bozorlar", "AQSH bozorining Yevropa va Osiyo bozorlariga ta'siri"),
+    ("Yangi texnologiyalar", "sun'iy intellekt va IT kompaniyalarining istiqboli"),
+    ("Energetika sektori", "yangi energiya manbalari bo'yicha investitsiya imkoniyatlari"),
+    ("Inflyatsiya", "inflatsiya va markaziy banklarning qarorlari bozor uchun nimani anglatadi"),
+    ("T Savdo sessiyasi", "Amerika birjasining ish vaqti va uning mahalliy bozorlar bilan bog'liqligi"),
+    ("Xatolarni tahlil qilish", "zarar ko'rsatgan pozitsiyalardan qanday saboqlar olish kerak"),
+    ("Pensiya va uzoq muddat", "foizlardan qanday foydalanish kerak"),
+    ("Kripto xavflari", "steykng va kripto bozorining o'ziga xos tahlikalari"),
+    ("Ikki korxonani taqqoslash", "bir xil sohada ikki kompaniyani qanday qiyoslash kerak"),
+    ("Valyuta risklari", "milliy valyutaning devalvatsiyasi nima uchun muhim"),
+    ("Yondashuv usullari", "fundamental va texnikal tahlilning farqi"),
+    ("Yosh kompaniyalar", "startup aksiyalarida xavf va imkoniyatlar"),
+    ("Foiz stavkalari va oltin", "foiz stavkalari o'sganda nima uchun oltin talab qilinadi"),
+    ("Mijozlik xaritasi", "obunachilarni qanday ajratish va alohida yondashish"),
+    ("Real foiz hisob-kitob", "foizning ta'sirini aniq hisoblash"),
+    ("Bugungi bozor vaziyati", "joriy kun trendi bo'yicha umumiy baholash"),
+    ("Investitsiya Portfolio", "turli xil aktivlarning o'zaro muvofiqligi"),
+    ("Ichki qaror", "o'z qaroringizni mustahkamlash usullari"),
+    ("Malakaviy savdo", "avtomatik tizimlarning afzalliklari va xavflari"),
+    ("Xalqaro valyuta juftliklari", "majburiy va erkin rejimdagi farq"),
+    ("Qimmatli qog'ozlar", "obligatsiya va aksiya o'rtasidagi farq"),
+    ("Yangi yil strategiyasi", "yillik reja tuzish bosqichlari"),
+    ("Favorsiz sharoitda", "bozor pasayganda nima qilish kerak"),
+    ("Ma'lumot manbalari", "qayerdan ishonchli ma'lumot olish kerak"),
+    ("Kommutativ byudjet", "oylik xarajatlarni tahlil qilish"),
+    ("Soliq solish asoslari", "soliq tushunchalari oddiy tilda"),
+    ("Nol", "bozor kuzatuvchilari uchun kundalik mashqlar"),
+]
+
+# Har bir postga birga yuboriladigan rasm uslublari (rasm prompti uchun).
+IMAGE_STYLES = [
+    ("financial chart", "3D-render, ko'k va yashil ranglar, fond bozori grafigi"),
+    ("candlestick chart", "chiroli narx grafigi, yorqin ranglar, futuristik uslub"),
+    ("stock market", "aksiyalar, raqamlar va o'sish chizig'i, zamonaviy grafika"),
+    ("crypto coins", "Bitcoin va Ethereum simvoli, porlaydigan metall effekti"),
+    ("city skyline", "zamonaviy shahar manzarasi, moliyaviy hudud, tunda"),
+    ("trading desk", "profesional treyder ish stoli, monitorlar, kichik yorug'lik"),
+    ("abstract finance", "moliyaviy grafika, chiziqli naqshlar,gradient ranglar"),
+    ("globe economy", "global iqtisodiyot shakli, xaritalar va valyuta belgilari"),
+    ("luxury watch", "ibratli soat va moliyaviy muvaffaqiyat ramzi, yumshoq yorug'lik"),
+    ("data visualization", "rangli diagrammalar va statistik grafikalar"),
+    ("smartphone investing", "telefonda grafik ko'rsatilgan, qulay uslub"),
+    ("golden coins", "oltin tangalar va moliyaviy barqarorlik ramzi"),
+    ("mountain peak", "moliyaviy cho'qqilish cho'qqisi, motivatsiya uchun"),
+    ("bank building", "klassik bank binosi, ishonch va barqarorlik"),
 ]
 
 
@@ -138,6 +192,44 @@ normal holat. Asosiy e'tibor sessiya boshlanishiga qaratilsin.
 Birja bozorida eng qiyin savol qaysi?
 
 #fond #forex #kripto #analiz""",
+        """🌅 Ertalabki reja: uchta ustun
+
+Har bir sessiya boshida o'zingizga uchta savol bering:
+1. Bugun qaysi sohani kuzataman?
+2. Qaysi yangilik narxga ta'sir qilishi mumkin?
+3. Qanday shartda pozitsiyani yopaman?
+
+📌 Nima uchun muhim:
+Aniq reja bo'lmaganda, har bir tebranish qaror
+kaqalligiga aylanadi. Reja bo'lsa, tebranish — bu
+shunchaki ma'lumot.
+
+💡 Amaliy maslahat:
+Rejangizni yozib qo'ying va uni buzishga shoshiling.
+Intizom — investitsiyaning eng qimmat qismi.
+
+Siz ertalabki sessiyada nima bilan boshlaysiz?
+
+#fond #aksiya #forex #kripto""",
+        """🌅 Bugungi kun uchun uchta e'tibor
+
+Kunlik ritm — investitsiyaning eng muhim odati.
+Kunlik tahlil bir necha daqiqa bilan boshlanadi:
+bozor ochilishi, Asiya sessiyasi yakuni, Yevropa kirishi.
+
+📌 Nima uchun muhim:
+Har bir sessiyaning o'z "ruhi" bor. Toshxon
+tushunishdan yaxshi — qachon qimmat, qachon
+arzon bo'lishini oldindan bilib bo'lmaydi,
+lekin tayyorgarlik mumkin.
+
+💡 Amaliy maslahat:
+Har kuni bir xil vaqtda tahlil qiling. Bu
+odat barqarorlikni oshiradi.
+
+Qachon bozor ko'rishni eng yoqgan usul?
+
+#fond #analiz #kripto #forex""",
     ],
     "noon": [
         """☀️ Tushlikdagi vaziyat: kun o'rtasidagi xulosa
@@ -176,6 +268,42 @@ Har bir pozitsiyada ikki savolni yozib qo'ying:
 Siz savollarga yozib qo'yasizmi yoki xotiradan ishlaysizmi?
 
 #fond #analiz #kripto #forex""",
+        """☀️ Tushlikdagi savol: likvidlik
+
+Likvidlik — bitta savolga javob: "men xohlagan
+miqdorda qancha tez sotib olsam bo'ladi?"
+
+📌 Nima uchun muhim:
+Likvidlik past bo'lganda kichik order ham
+narxni sezilarli surilishga majbur qiladi. Bu
+yirik kompaniyalarda kam, kichiklarda ko'p
+bo'ladi.
+
+💡 Amaliy maslahat:
+Yangi kompaniya tanlaganda avval likvidlikni
+tekshiring — u ishlab turgan kompaniya bo'lsa,
+mashina ham yaxshi ishlaydi.
+
+Likvidlikni qanday tekshirasiz?
+
+#fond #aksiya #forex #kripto""",
+        """☀️ Bugungi savol: nima uchun bozor ko'tarildi?
+
+Har bir tebranishning biror sababi bor. Sababni
+bilmasangiz, keyingi tebranishda ham xato qilasiz.
+
+📌 Uchta asosiy sabab:
+1. Yangi ma'lumot — hisobot, statistika, gap
+2. Katta order — bir fonda ko'p hajm
+3. Havo — qo'rquv yoki ishtiyoq
+
+💡 Amaliy maslahat:
+Ko'tarilish sababini yozib boring. Keyin bir xil
+holat yana bo'lsa — tayyor bo'lasiz.
+
+Siz bozor sabablarini qanday kuzatarsiz?
+
+#fond #analiz #kripto""",
     ],
     "evening": [
         """🌆 Kechki xulosa: kunni yakunlash
@@ -213,6 +341,40 @@ saqlab qoladi.
 Siz ertani qanday tayyorlaysiz?
 
 #fond #analiz #kripto #forex""",
+        """🌆 Kechki savol: qaysi xato takrorlanmoqda?
+
+Har bir muvaffaqiyatsizlikda bitta savol bor:
+"bu xato bir marta bo'ldimi yoki takrorlanadi?"
+
+📌 Takrorlanuvchi xatolar:
+1. Rejasiz savdo — eng ko'p uchraydi
+2. Xavfsizlik chegarasini qo'ymaslik
+3. Katta pozitsiyada haddan tashqari ishonch
+
+💡 Amaliy maslahat:
+Oxirgi 10 ta qaroringizni yozib ko'ring. Qaysi
+biri sizga eng ko'p qiyinchilik tug'irdi?
+
+Sizning eng ko'p takrorlanuvchi xatoyingiz qaysi?
+
+#fond #forex #kripto #smm""",
+        """🌆 Kechqurun: barqarorlik tekshiruvi
+
+Barqarorlik — "men bilsam bo'lardim" emas,
+"men har doim qilaman" degan odat.
+
+📋 Uchta oddiy tekshiruv:
+1. Portfelda bitta soha egarmasligi
+2. Xavf chegaralari yozilganmi
+3. Kelgusi hafta uchun reja bor
+
+💡 Amaliy maslahat:
+Bu uchtasi bir marta qilingan bo'lsa, bozor
+qanday bo'lishidan qat'i nazar, siz barqarorsiz.
+
+Siz qaysi birini birinchi bo'lib tuzatildi?
+
+#fond #aksiya #analiz #forex""",
     ],
     "default": [
         """📊 Kanalimizdan foydali ma'lumot
@@ -238,15 +400,155 @@ Siz qaysi tushunchani o'rgatishimni xohlaysiz?
 }
 
 
-def _pick_topic() -> str:
-    """Bugungi kun uchun mavzuni tanlaydi (vaqt mintaqasiga mos)."""
-    index = now_tz().timetuple().tm_yday % len(POST_TOPICS)
-    return POST_TOPICS[index]
+# ===== RASM YARATISH =====
+# Rasmlar AI orqali yaratiladi. Muhim:
+#  * kvota alohida hisoblanadi (AI_IMAGE_DAILY_LIMIT)
+#  * kvota yo'q yoki xato bo'lsa — post YANA HAM chiqadi, faqat rasmsiz
+#  * rasm generatsiyasi sekin, shuning uchun timeout qo'yilgan
+
+_IMAGE_MODEL = None
 
 
-def _fallback(post_type: str, reason: str = "") -> str:
-    """AI o'rniga ishlatiladigan zaxira matn."""
+def _get_image_model():
+    """Rasmlar uchun alohida model (matndan alohida kvota)."""
+    global _IMAGE_MODEL
+    if _IMAGE_MODEL is None:
+        try:
+            _IMAGE_MODEL = genai.GenerativeModel(IMAGE_MODEL)
+        except Exception as e:
+            print(f"⚠️  Rasm modeli yuklanmadi: {e}")
+            return None
+    return _IMAGE_MODEL
+
+
+def _sync_generate_image(prompt: str):
+    """
+    Sinxron rasm yaratish — faqat thread ichida ishlating.
+
+    google-generativeai 0.8.3 da `response_modalities` maydoni yo'q
+    (u yangi SDK versiyalarida bor). Rasmli modellar default ravishda
+    rasm qaytaradi, shuning uchun qo'shimcha parametr kerak emas.
+    """
+    m = _get_image_model()
+    if m is None:
+        raise TransientAIError("Rasm modeli mavjud emas")
+    response = m.generate_content(
+        prompt,
+        request_options={"timeout": IMAGE_TIMEOUT},
+    )
+    if not response.candidates:
+        raise TransientAIError("AI rasm qaytarmadi")
+    for part in (response.candidates[0].content.parts or []):
+        inline = getattr(part, "inline_data", None)
+        if inline and getattr(inline, "data", None):
+            return (inline.data, inline.mime_type or "image/png")
+    raise TransientAIError("AI rasm qaytarmadi")
+
+
+def build_image_prompt(topic: str, style: str) -> str:
+    """Rasm uchun prompt — matn yozish emas, faqat vizual tasvir."""
+    return (
+        f"Create a modern, professional financial illustration.\n"
+        f"Subject: {topic}\n"
+        f"Style: {style}\n\n"
+        f"Requirements:\n"
+        f"- 16:9 wide banner, suitable for a Telegram channel header\n"
+        f"- Modern 3D render look, deep blue and green palette\n"
+        f"- Clean composition, no text, no letters, no numbers, no logos\n"
+        f"- Professional financial news illustration\n"
+        f"- Soft cinematic lighting, high detail"
+    )
+
+
+async def generate_image(topic: str, style: str = "") -> Optional[bytes]:
+    """
+    Post uchun rasm yaratadi. Qaytaradi: (bytes, mime_type) yoki None.
+
+    Hech qachon istisno ko'tarmaydi — None qaytarsa post rasmsiz chiqadi.
+    """
+    if not IMAGE_ENABLED:
+        return None
+
+    used = await database.ai_used_images_today()
+    if used >= AI_IMAGE_DAILY_LIMIT:
+        print(f"   🖼  Rasm kvota tugagan ({used}/{AI_IMAGE_DAILY_LIMIT}) — rasmsiz")
+        return None
+
+    style = style or _pick_image_style()
+    prompt = build_image_prompt(topic, style)
+
+    for attempt in range(1, 3):
+        try:
+            result = await asyncio.to_thread(_sync_generate_image, prompt)
+            await database.record_image_call(True, style)
+            print(f"   🖼  Rasm tayyor ({attempt}) — {style[:40]}")
+            return result
+        except ResourceExhausted as e:
+            await database.record_image_call(False, "image_429")
+            if "PerDay" in str(e) or "per day" in str(e).lower():
+                print("   🖼  Rasm uchun kunlik kvota tugagan — rasmsiz")
+                return None
+            wait = min(_parse_retry_after(e) or 8, 40)
+            print(f"   ⚠️  Rasm 429, {wait}s kutamiz ({attempt})")
+            await asyncio.sleep(wait)
+        except Exception as e:
+            await database.record_image_call(False, "image_err")
+            print(f"   ⚠️  Rasm xatosi ({attempt}): {type(e).__name__}: {e}")
+            await asyncio.sleep(3)
+
+    print("   ⚠️  Rasm yaratilmadi — post rasmsiz yuboriladi")
+    return None
+
+
+def _pick_topic(post_type: str = "morning", used: set = None) -> str:
+    """
+    Mavzuni tanlaydi — BIR XIL MAVZUNI QAYTARMAYDI.
+
+    Eski kod: `yday % len(POST_TOPICS)` — har kuni bir xil natija berardi
+    va kun ichida 3 ta post bir xil mavzuda chiqardi.
+
+    Yangi:
+      1. Allaqachon ishlatilgan mavzular (used) birinchi bo'lib chiqariladi
+      2. keyin tasodifiy tanlanadi
+      3. har bir mavzu uchun alohida "burchak" (angle) qo'shiladi —
+         shuning uchun matn har doim boshqacha ochiladi
+    """
+    pool = list(POST_TOPICS)
+
+    if used:
+        fresh = [p for p in pool if p[0] not in used]
+        if fresh:
+            pool = fresh
+        else:
+            # Barcha mavzular ishlatilgan — yangi kundan boshlash
+            used.clear()
+
+    topic, angle = random.choice(pool)
+
+    # post turiga qarab burchakni moslashtiramiz
+    type_hint = {
+        "morning": "Bugungi kun uchun reja va asosiy e'tibor nuqtalari",
+        "noon": "Qisqa tahlil yoki dolzarb savol",
+        "evening": "Kun yakuni: xulosa va ertangi kunga tayyorgarlik",
+    }.get(post_type, "")
+
+    return f"{topic} — {angle}. {type_hint}".strip()
+
+
+def _pick_image_style(used: set = None) -> str:
+    """Rasm uslubini tanlaydi (takrorlanmasligi uchun)."""
+    styles = [s for s in IMAGE_STYLES if s[0] not in (used or set())] or IMAGE_STYLES
+    name, desc = random.choice(styles)
+    return f"{name} ({desc})"
+
+
+def _fallback(post_type: str, reason: str = "", used: set = None) -> str:
+    """AI o'rniga ishlatiladigan zaxira matn (takrorlanmaslik bilan)."""
     bank = FALLBACK_POSTS.get(post_type) or FALLBACK_POSTS["default"]
+    if used:
+        fresh = [t for t in bank if t not in used]
+        if fresh:
+            bank = fresh
     text = random.choice(bank)
     if reason:
         print(f"⚠️  Zaxira matn ishlatildi ({post_type}): {reason}")
@@ -396,13 +698,19 @@ async def _call_with_retry(prompt: str, label: str) -> str:
 
 
 # ===== ASOSIY FUNKSIYALAR =====
-async def generate_post(topic: str = None, post_type: str = "morning") -> str:
+async def generate_post(topic: str = None, post_type: str = "morning",
+                        used_topics: set = None, with_image: bool = True) -> dict:
     """
-    AI orqali post yozadi. AI ishlamasa — zaxira matn qaytaradi.
-    Hech qachon istisno ko'tarilmaydi.
+    AI orqali post yozadi va (imkon bo'lsa) rasm yaratadi.
+
+    Qaytaradi:
+        {"content": str, "image": bytes|None, "topic": str, "source": str}
+
+    Hech qachon istisno ko'tarmaydi — AI ishlamasa zaxira matn,
+    rasm yaratilmasa None (post rasmsiz chiqadi).
     """
     if not topic:
-        topic = _pick_topic()
+        topic = _pick_topic(post_type, used_topics)
 
     time_context = {
         "morning": "Bu ertalabki post — kun boshida bozor yangiliklari va reja haqida yozing.",
@@ -417,14 +725,26 @@ Bu postning turi: {time_context}
 
 Shu mavzu bo'yicha tayyor post matnini yoz."""
 
+    source = "AI"
     try:
         text = await _call_with_retry(prompt, f"post/{post_type}")
         cleaned = _clean(text)
-        return cleaned or _fallback(post_type, "bo'sh matn")
+        if not cleaned:
+            raise TransientAIError("bo'sh matn")
     except (QuotaExhausted, TransientAIError) as e:
-        return _fallback(post_type, str(e))
+        cleaned = _fallback(post_type, str(e), used_topics)
+        source = "zaxira"
     except Exception as e:
-        return _fallback(post_type, f"{type(e).__name__}: {e}")
+        cleaned = _fallback(post_type, f"{type(e).__name__}: {e}", used_topics)
+        source = "zaxira"
+
+    image = None
+    if with_image:
+        image = await generate_image(topic)
+        if image:
+            image = image[0] if isinstance(image, tuple) else image
+
+    return {"content": cleaned, "image": image, "topic": topic, "source": source}
 
 
 async def generate_post_for_topic(topic: str) -> str:
