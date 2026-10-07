@@ -184,6 +184,14 @@ async def get_recent_posts(limit: int = 10):
     )
 
 
+async def get_recent_topics(limit: int = 5):
+    """Yaqinda ishlatilgan mavzular — takrorlanmaslik uchun."""
+    return await _query_all(
+        "SELECT topic FROM posts WHERE topic IS NOT NULL AND topic != '' "
+        "ORDER BY created_at DESC LIMIT ?", (limit,)
+    )
+
+
 async def get_today_posts_count() -> int:
     row = await _query_one(
         "SELECT COUNT(*) AS c FROM posts WHERE status='sent' AND DATE(sent_at) = ?",

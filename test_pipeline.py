@@ -16,6 +16,7 @@ Sinov qilinadiganlar:
 """
 import asyncio
 import os
+import random
 import sys
 import types
 from datetime import datetime, timedelta
@@ -568,6 +569,37 @@ async def main():
           row_b["status"])
     check("post rasmsiz yuborildi", len(PHOTOS) == 0)
     ai._get_image_model = lambda: FakeImageModel()
+
+    # ---------- 14. PROMPT VAZIFALIGI ----------
+    print("\n1️⃣4️⃣ Har safar boshqa prompt (takrorlanmaslik)")
+    combos = set()
+    for _ in range(8):
+        combos.add((
+            random.choice(ai.POST_FORMATS)[0],
+            random.choice(ai.OPENINGS),
+            random.choice(ai.TONES),
+            random.choice(ai.FACT_HINTS),
+        ))
+    check("8 ta prompt kombinatsiyasi noyob", len(combos) == 8,
+          f"{len(combos)}/8")
+    check("tuzilish variantlari >= 8", len(ai.POST_FORMATS) >= 8,
+          f"{len(ai.POST_FORMATS)} ta")
+    check("ochilish variantlari >= 5", len(ai.OPENINGS) >= 5,
+          f"{len(ai.OPENINGS)} ta")
+    check("ohang variantlari >= 6", len(ai.TONES) >= 6,
+          f"{len(ai.TONES)} ta")
+    check("fakt/eslatma variantlari >= 6", len(ai.FACT_HINTS) >= 6,
+          f"{len(ai.FACT_HINTS)} ta")
+    total = (len(ai.POST_FORMATS) * len(ai.OPENINGS) * len(ai.TONES)
+             * len(ai.FACT_HINTS) * len(ai.POST_TOPICS))
+    check("jami kombinatsiya > 10 000", total > 10000, f"{total:,}")
+    check("temperature yuqori (1.0)",
+          ai.GEN_CONFIG.get("temperature") == 1.0,
+          str(ai.GEN_CONFIG.get("temperature")))
+
+    # promptga avvalgi postlar kiritiladimi (takrorlanmaslik uchun)
+    check("bazada avvalgi postlar olinishi mumkin",
+          hasattr(database, "get_recent_posts"))
 
     # ---------- NATIJA ----------
     print("\n" + "=" * 68)

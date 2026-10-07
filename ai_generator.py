@@ -48,8 +48,10 @@ genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel(GEMINI_MODEL)
 
 GEN_CONFIG = {
-    "temperature": 0.9,
-    "top_p": 0.95,
+    # Yuqori temperatura = har safar boshqacha matn.
+    # Pastda (0.7-0.9) model bir xil javobni takrorlab beradi.
+    "temperature": 1.0,
+    "top_p": 0.98,
     "max_output_tokens": GEMINI_MAX_OUTPUT_TOKENS,
     "candidate_count": 1,
 }
@@ -85,6 +87,57 @@ Yodingizda tuting:
 Javobingiz: FAQAT tayyor post matni.
 Bu yerda hech qanday izoh, tushuntirish, ro'yxat yoki "Checked" kabi
 so'zlar yozilmaydi — ular yozilsa, javob noto'g'ri hisoblanadi."""
+
+
+# ===== TUZILMA VA OCHILISH USLUBLARI =====
+# Nima uchun bu kerak: prompt bir xil bo'lsa, model bir xil javob beradi.
+# Har safar TURLI tuzilma va ochilish berilsa — matn ham, o'lcham ham,
+# joylashuv ham o'zgaradi. Bu — "har doim yangi post" ning asosi.
+
+POST_FORMATS = [
+    ("savol bilan ochilish", "Boshlang'ich savol bering, keyin javobni bering"),
+    ("savol + ro'yxat", "Savol, keyin 3-4 punktli qisqa ro'yxat, oxirida xulosa"),
+    ("qisqa hikoya", "Bitta real hayot misolini qisqa hikoya qilib yozing, undan dars oling"),
+    ("noto'g'ri tasavvur", "Ko'pchilikda uchraydigan xato tasavvurni ayting, to'g'risini oching"),
+    ("taqqoslash", "Ikki yondashuvni yoki ikki aktivni qiyoslab yozing"),
+    ("aniq raqam bilan", "Bitta aniq raqam yoki foizdan boshlang"),
+    ("savol + javob + savol", "Bir savol, unga javob, keyin obunachiga savol"),
+    ("og'irlatilgan maslahat", "Ogohlantirish tonida boshlang, keyin yechim bering"),
+    ("kunlik sharh", "Kunning vaziyatiga qisqa ishora qilib, tahlil bering"),
+    ("3 ta qoida", "Uchta qisqa qoida ro'yxati, har biri bir juml bilan izohlangan"),
+]
+
+OPENINGS = [
+    "Emoji bilan qisqa sarlavha",
+    "Savol bilan sarlavha",
+    "Sho'xta bayonot bilan sarlavha",
+    "Raqam bilan sarlavha",
+    "Qisqa hikoya bilan sarlavha",
+]
+
+# Har safar promptga qo'shiladigan tasodifiy "kayfiyat" — matnni
+# har gal boshqacha ohanga olib boradi.
+TONES = [
+    "sodda va do'stona",
+    "qisqa va aniq",
+    "yengil hazil bilan",
+    "amaliy va foydali",
+    "o'quvchini rag'batlantiruvchi",
+    "savol berishga undovchi",
+    " tajriba va bilimni taqqoslagan",
+]
+
+# Mavzu bo'yicha qisqa fakt/eslatma — matnga aniq zarrachalar kiritadi
+FACT_HINTS = [
+    "diqqat qiling: bir kunlik tebranish uzoq muddatli trend emas",
+    "eslatib o'tamiz: likvidlik past bo'lsa, katta order narxni tez suradi",
+    "Muhim: foiz stavkalari oshsa, aksiyalar bilan birga oltin ham qiziydi",
+    "kuchsiz nuqta: kompaniya qarziga haddan tashqari ko'p bog'lansa, xavf ortadi",
+    "esda boriring: har bir portfelda kamida bir necha soha bo'lishi kerak",
+    "amaliy qoida: rejangizni yozmasdan savdo qilmang",
+    "og'rlantirmoqchi bo'lamiz: natijani emas, jarayonni kuzating",
+    "aniqlik uchun: har bir kompaniyaning moliyaviy hisoboti ochiq bo'ladi",
+]
 
 
 # ===== POST MAVZULARI (har kunda takrorlanmaydigan qilib) =====
@@ -718,10 +771,44 @@ async def generate_post(topic: str = None, post_type: str = "morning",
         "evening": "Bu kechki post — kun yakuni, xulosa yoki ertangi kunga tayyorgarlik haqida yozing.",
     }.get(post_type, "")
 
+    # HAR SAFAR BOSHQA prompt: tuzilma, ochilish, ohang va fakt
+    # tasodifiy tanlanadi — shuning uchun matn ham doim yangi bo'ldi.
+    fmt, fmt_desc = random.choice(POST_FORMATS)
+    opening = random.choice(OPENINGS)
+    tone = random.choice(TONES)
+    fact = random.choice(FACT_HINTS)
+    seed = random.randint(1000, 9999)
+
+    # Yaqinda chiqarilgan postlarni ko'rsatamiz — model ularni
+    # TAKRORLAMASLIGI kerak. Bu "har safar yangi"ning asosiy kaliti.
+    avoid = ""
+    try:
+        recent = await database.get_recent_posts(3)
+        titles = []
+        for r in recent:
+            first = (r["content"] or "").strip().split("\n")[0][:80]
+            if first:
+                titles.append(f"- {first}")
+        if titles:
+            avoid = ("\nMANA O'ZGA POSTLAR (bularni TAKRORLAMANG, "
+                     "boshqa sarlavha va boshqa misol ishlating):\n"
+                     + "\n".join(titles) + "\n")
+    except Exception:
+        pass
+
     prompt = f"""{SYSTEM_PROMPT}
 
 Bu postning mavzusi: {topic}
-Bu postning turi: {time_context}
+Post turi: {time_context}
+{avoid}
+SHU POST UCHUN QAT'IY KO'RSATMALAR:
+1. Tuzilish: {fmt} - {fmt_desc}
+2. Sarlavha uslubi: {opening}
+3. Ohang: {tone}
+4. Matnga shu fikrni yumshoq tarzda qo'shing: {fact}
+5. Bu post boshqa postlardan butunlay boshqacha bo'lsin -
+   boshqa sarlavha, boshqa misol, boshqa izoh boshqacha bo'lsin.
+6. Matn uzunligi {500 + seed % 250}-{700 + seed % 200} belgi orasida bo'lsin.
 
 Shu mavzu bo'yicha tayyor post matnini yoz."""
 
@@ -749,9 +836,23 @@ Shu mavzu bo'yicha tayyor post matnini yoz."""
 
 async def generate_post_for_topic(topic: str) -> str:
     """Aniq mavzu bo'yicha post (real vaqtda berilgan vazifa uchun)."""
+    # /schedule orqali kelgan mavzu ham tasodifiy uslub oladi —
+    # aks holda u avvalgi postlarga o'xshab qoladi.
+    fmt, fmt_desc = random.choice(POST_FORMATS)
+    opening = random.choice(OPENINGS)
+    tone = random.choice(TONES)
+    seed = random.randint(1000, 9999)
+
     prompt = f"""{SYSTEM_PROMPT}
 
 Bu postning mavzusi: {topic}
+
+SHU POST UCHUN KO'RSATMALAR:
+- Tuzilish: {fmt} — {fmt_desc}
+- Sarlavha: {opening}
+- Ohang: {tone}
+- Boshqa postlardan butunlay boshqacha bo'lsin
+- Uzunligi {500 + seed % 250}-{700 + seed % 200} belgi
 
 Shu mavzu bo'yicha tayyor post matnini yoz."""
 
