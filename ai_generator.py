@@ -140,53 +140,89 @@ FACT_HINTS = [
 ]
 
 
-# ===== POST MAVZULARI (har kunda takrorlanmaydigan qilib) =====
-# Muhim: mavzular kengaytirilgan va ularga "yo'nalish" (angle) qo'shildi.
-# Bitta kun ichida ham, kunlar o'tsa ham mavzu takrorlanmasligi kerak —
-# aks holda kanal bir xil ko'rinadi.
-# (topic, angle) — angle matnning burchagini belgilaydi.
+# ===== POST MAVZULARI — 6 KATEGORIYA =====
+# Kategoriyalar (har bir post bittasiga kiradi):
+#   1) YANGILIKLAR        — bozordagi joriy voqealar
+#   2) FOYDALI MA'LUMOT    — ta'lim va bilim
+#   3) KRIPTO YANGILIKLARI — Bitcoin, Ethereum, altcoin
+#   4) FX YANGILIKLARI     — valyuta juftliklari
+#   5) MOTIVATSIYA         — ruhlantiruvchi postlar
+#   6) TREADING XATOLARI   — keng tarqalgan xatolar
+#
+# (topic, angle, category) — angle matnning burchagini belgilaydi.
+# category promptga uzatiladi — shunda AI har postda o'z turida yozadi.
+
 POST_TOPICS = [
-    ("Kunlik bozor yangiliklari", "asosiy indekslar va valyuta kurslaridagi o'zgarishlarga qisqa tahlil"),
-    ("Bitta aksiya tahlili", "mashhur kompaniyaning kuchli tomonlari va xavflarini taqqoslash"),
-    ("Kripto bozori", "Bitcoin va Ethereum narxlarining ehtimoliy yo'nalishi"),
-    ("Forex asoslari", "eng ko'p savdodagi valyuta juftliklarining o'zaro aloqasi"),
-    ("Birinchi qadam", "boshlovchilar uchun fond bozoriga xavfsizroq kirish yo'li"),
-    ("Diversifikatsiya", "portfelni sohalar bo'yicha taqsimlashning oddiy qoidalari"),
-    ("Neft va oltin", "tinchlik davri narxlari nima uchun o'zgaradi"),
-    ("Hisobotlar tahlili", "kompaniya hisobotida qaysi qatorlarga qaratish kerak"),
-    ("Uzoq muddatli strategiya", "foiz va barchaga e'tiborsiz qoldirishning farqi"),
-    ("Bozor psixologiyasi", "qalboviy hissiyot qachon xato qarorga olib keladi"),
-    ("Likvidlik tushunchasi", "bitta aksiyaning narxi nima uchun keskin sakraydi"),
-    ("Dividendlar", "ulushli aksiyalar qanday ishlaydi va nimalarga e'tibor berish kerak"),
-    ("Texnikal ko'rsatkichlar", "qisqa muddatli signalda nimani tekshirish kerak"),
-    ("Xalqaro bozorlar", "AQSH bozorining Yevropa va Osiyo bozorlariga ta'siri"),
-    ("Yangi texnologiyalar", "sun'iy intellekt va IT kompaniyalarining istiqboli"),
-    ("Energetika sektori", "yangi energiya manbalari bo'yicha investitsiya imkoniyatlari"),
-    ("Inflyatsiya", "inflatsiya va markaziy banklarning qarorlari bozor uchun nimani anglatadi"),
-    ("T Savdo sessiyasi", "Amerika birjasining ish vaqti va uning mahalliy bozorlar bilan bog'liqligi"),
-    ("Xatolarni tahlil qilish", "zarar ko'rsatgan pozitsiyalardan qanday saboqlar olish kerak"),
-    ("Pensiya va uzoq muddat", "foizlardan qanday foydalanish kerak"),
-    ("Kripto xavflari", "steykng va kripto bozorining o'ziga xos tahlikalari"),
-    ("Ikki korxonani taqqoslash", "bir xil sohada ikki kompaniyani qanday qiyoslash kerak"),
-    ("Valyuta risklari", "milliy valyutaning devalvatsiyasi nima uchun muhim"),
-    ("Yondashuv usullari", "fundamental va texnikal tahlilning farqi"),
-    ("Yosh kompaniyalar", "startup aksiyalarida xavf va imkoniyatlar"),
-    ("Foiz stavkalari va oltin", "foiz stavkalari o'sganda nima uchun oltin talab qilinadi"),
-    ("Mijozlik xaritasi", "obunachilarni qanday ajratish va alohida yondashish"),
-    ("Real foiz hisob-kitob", "foizning ta'sirini aniq hisoblash"),
-    ("Bugungi bozor vaziyati", "joriy kun trendi bo'yicha umumiy baholash"),
-    ("Investitsiya Portfolio", "turli xil aktivlarning o'zaro muvofiqligi"),
-    ("Ichki qaror", "o'z qaroringizni mustahkamlash usullari"),
-    ("Malakaviy savdo", "avtomatik tizimlarning afzalliklari va xavflari"),
-    ("Xalqaro valyuta juftliklari", "majburiy va erkin rejimdagi farq"),
-    ("Qimmatli qog'ozlar", "obligatsiya va aksiya o'rtasidagi farq"),
-    ("Yangi yil strategiyasi", "yillik reja tuzish bosqichlari"),
-    ("Favorsiz sharoitda", "bozor pasayganda nima qilish kerak"),
-    ("Ma'lumot manbalari", "qayerdan ishonchli ma'lumot olish kerak"),
-    ("Kommutativ byudjet", "oylik xarajatlarni tahlil qilish"),
-    ("Soliq solish asoslari", "soliq tushunchalari oddiy tilda"),
-    ("Nol", "bozor kuzatuvchilari uchun kundalik mashqlar"),
+    # ===== 1) YANGILIKLAR =====
+    ("Bozor yangiligi", "global bozorda kuzatilayotgan asosiy o'zgarishlar", "yangilik"),
+    ("Indekslar holati", "asosiy fond bozori indekslaridagi harakat", "yangilik"),
+    ("Makro yangiliklar", "iqtisodiy ko'rsatkichlar va ularning ta'siri", "yangilik"),
+    ("Kompaniya hisoboti", "yangi natijalar va ularning bozorga ta'siri", "yangilik"),
+    ("Bozor sentimenti", "investorlar kayfiyati va uning o'zgarishi", "yangilik"),
+    ("Bozor o'zgarishlari", "narxlarda keskin o'zgarish bo'lgan paytlar", "yangilik"),
+
+    # ===== 2) FOYDALI MA'LUMOT =====
+    ("Likvidlik tushunchasi", "bitta aktivning qanchalik tez sotilishi", "foydali"),
+    ("Diversifikatsiya", "portfelni to'g'ri taqsimlash qoidalari", "foydali"),
+    ("Risk boshqaruvi", "xavfni qanday nazorat qilish kerak", "foydali"),
+    ("Foyda va zarar", "pozitsiya yopish qoidalari", "foydali"),
+    ("Uzoq muddatli investitsiya", "foiz va kompaniyaning ishi", "foydali"),
+    ("Boshlang'ich qadamlar", "birinchi marta investitsiya qilish", "foydali"),
+    ("Portfolio balansi", "aktivlar taqsimotini kuzatish", "foydali"),
+    ("Vaqt boshqaruvi", "qachon savdo qilish kerak", "foydali"),
+    ("Taxlil usullari", "asosiy va texnikal tahlil farqi", "foydali"),
+
+    # ===== 3) KRIPTO YANGILIKLARI =====
+    ("Bitcoin", "narx harakati va uni ta'sirlagan omillar", "kripto"),
+    ("Ethereum", "zaxira tizimining rivojlanishi", "kripto"),
+    ("Altcoinlar", "kichik kriptovalyutalardagi harakat", "kripto"),
+    ("Kripto yangiliklari", "bozordagi so'nggi voqealar", "kripto"),
+    ("Staking va DeFi", "foiz olish va markazlashtirilmagan moliya", "kripto"),
+    ("Kripto xavflari", "bozor kuchli tebranish qachon bo'ladi", "kripto"),
+
+    # ===== 4) FX YANGILIKLARI =====
+    ("EUR/USD", "yevropa dollari juftligidagi tendensiya", "fx"),
+    ("GBP/USD", "sterlin va dollar o'zaro munosabati", "fx"),
+    ("USD/JPY", "yen va dollar kuchining o'zgarishi", "fx"),
+    ("Oltin va neft", "tinchlik valyutalari bozordagi o'rni", "fx"),
+    ("Markaziy banklar", "foiz stavkalari qarorlari va ta'siri", "fx"),
+    ("Forex yangiliklari", "valyuta bozoridagi yangi voqealar", "fx"),
+
+    # ===== 5) MOTIVATSIYA =====
+    ("Sabr va intizom", "emotionga bo'linmaslik", "motivatsiya"),
+    ("Zarar va tiklanish", "yo'qotilgan kunlardan keyin nima qilish", "motivatsiya"),
+    ("Realistic maqsad", "juda katta maqsad qo'yish xatosi", "motivatsiya"),
+    ("O'rganish", "har kuni yangi narsa o'rganish", "motivatsiya"),
+    ("Ishonch va shubha", "qaror qabul qilishdagi muvozanat", "motivatsiya"),
+    ("Uzoq muddatli fikr", "qisqa muddatga bog'lanmaslik", "motivatsiya"),
+
+    # ===== 6) TREADING XATOLARI =====
+    ("Xatolar: rejasiz savdo", "reja yo'qligi natijada kelib chiqadi", "xatolar"),
+    ("Xatolar: haddan tashqari ishonch", "orziyalik natijada qanday zarar beradi", "xatolar"),
+    ("Xatolar: zarar beruvchi savdo", "takrorlanuvchi xatolarni tahlil qilish", "xatolar"),
+    ("Xatolar: valyuta hisobini tushmaslik", "kurs o'zgarishining ta'siri", "xatolar"),
+    ("Xatolar: kunlik shovqin", "qisqa muddatli tebranishni chalg'itish", "xatolar"),
+    ("Xatolar: nazoratni yo'qotish", "hisobni to'xtotmaslik", "xatolar"),
+    ("Xatolar: minimal va maksimal", "kirish va chiqish nuqtalarini belgilash", "xatolar"),
+    ("Xatolar: hissiyot bilan", "emotsiya qarorni qanday buzadi", "xatolar"),
 ]
+
+# Kategoriyalar bo'yicha qisqa tavsif — promptga uzatiladi,
+# shunda AI har postda o'z turida (yangilik/xato/motivatsiya) yozadi.
+CATEGORY_HINTS = {
+    "yangilik": "bu YENGILIK bo'lishi kerak — nima bo'ldi, nima uchun muhim, "
+                "nima qilish kerak. Aniq raqamlar bilan yoz",
+    "foydali": "bu TA'LIM bo'lishi kerak — tushunchani oddiy tilda tushuntiring, "
+               "misol bering, amaliy foyda keltiring",
+    "kripto": "kripto bozori haqida — Bitcoin/Ethereum/altcoin, "
+              "bozor dinamikasi va xavflar",
+    "fx": "valyuta bozori haqida — EUR/USD, GBP/USD, USD/JPY, "
+          "markaziy banklar, oltin-neft",
+    "motivatsiya": "bu RUHANTIRUVCHI bo'lishi kerak — qisqa, ilhomlantiruvchi, "
+                   "o'quvchini oldinga undovchi. Sabr va intizom haqida",
+    "xatolar": "bu XATO bo'lishi kerak — keng tarqalgan xatoni ayting, "
+               "nima uchun xato, uni qanday tuzatish kerak",
+}
 
 # Har bir postga birga yuboriladigan rasm uslublari (rasm prompti uchun).
 IMAGE_STYLES = [
@@ -204,6 +240,21 @@ IMAGE_STYLES = [
     ("golden coins", "oltin tangalar va moliyaviy barqarorlik ramzi"),
     ("mountain peak", "moliyaviy cho'qqilish cho'qqisi, motivatsiya uchun"),
     ("bank building", "klassik bank binosi, ishonch va barqarorlik"),
+    # motivatsiya uchun
+    ("sunrise mountain", "cho'qqidan quyosh ko'tarilishi, yaxshi kelajak"),
+    ("runner finish", "marafon tugash chizig'i, g'alaba va intizom"),
+    ("compass path", "kompas va yo'l, to'g'ri yo'nalish"),
+    ("growth plant", "o'suvchi o'simlik, uzoq muddatli o'sish"),
+    # xatolar uchun
+    ("broken chart", "uzilgan grafik, xato va ogohlantirish"),
+    ("warning triangle", "diqqat belgisi, xavfni ko'rsatish"),
+    ("stop sign finance", "savdodan to'xtash belgisi, xato nazorati"),
+    # kripto uchun
+    ("bitcoin coin", "oltiin Bitcoin tangasi, kripto simvoli"),
+    ("blockchain cubes", "zanjir bloklari, texnologiya"),
+    # fx uchun
+    ("currency arrows", "turli valyuta strelkalari, kurs o'zgarishi"),
+    ("trading terminal", "foreks terminali, valyuta juftliklari"),
 ]
 
 
@@ -513,7 +564,7 @@ def build_image_prompt(topic: str, style: str) -> str:
     )
 
 
-async def generate_image(topic: str, style: str = "") -> Optional[bytes]:
+async def generate_image(topic: str, style: str = "", category: str = "") -> Optional[bytes]:
     """
     Post uchun rasm yaratadi. Qaytaradi: (bytes, mime_type) yoki None.
 
@@ -527,7 +578,7 @@ async def generate_image(topic: str, style: str = "") -> Optional[bytes]:
         print(f"   🖼  Rasm kvota tugagan ({used}/{AI_IMAGE_DAILY_LIMIT}) — rasmsiz")
         return None
 
-    style = style or _pick_image_style()
+    style = style or _pick_image_style(category=category)
     prompt = build_image_prompt(topic, style)
 
     for attempt in range(1, 3):
@@ -553,19 +604,30 @@ async def generate_image(topic: str, style: str = "") -> Optional[bytes]:
     return None
 
 
-def _pick_topic(post_type: str = "morning", used: set = None) -> str:
+# Post turiga mos kategoriya — kunlik reja tabiiy o'zgaradi:
+#   ertalab = yangilik (bozor ochilishi)
+#   tushlik = foydali ma'lumot yoki kripto/FX
+#   kechki  = xatolar yoki motivatsiya
+TYPE_CATEGORIES = {
+    "morning": ["yangilik", "fx", "foydali"],
+    "noon": ["kripto", "foydali", "yangilik"],
+    "evening": ["xatolar", "motivatsiya", "foydali"],
+}
+
+
+def _pick_topic(post_type: str = "morning", used: set = None):
     """
-    Mavzuni tanlaydi — BIR XIL MAVZUNI QAYTARMAYDI.
+    Mavzuni tanlaydi va QAYTARADI:
+        (mavzu_burchagi, kategoriya)
 
-    Eski kod: `yday % len(POST_TOPICS)` — har kuni bir xil natija berardi
-    va kun ichida 3 ta post bir xil mavzuda chiqardi.
-
+    Eski kod: `yday % len(POST_TOPICS)` — har kuni bir xil natija berardi.
     Yangi:
-      1. Allaqachon ishlatilgan mavzular (used) birinchi bo'lib chiqariladi
-      2. keyin tasodifiy tanlanadi
-      3. har bir mavzu uchun alohida "burchak" (angle) qo'shiladi —
-         shuning uchun matn har doim boshqacha ochiladi
+      1. Post turiga mos kategoriyalar preferensiya qilinadi
+         (ertalab — yangilik, kechki — xato/motivatsiya)
+      2. ishlatilgan mavzular chiqariladi
+      3. tasodifiy tanlanadi
     """
+    prefer = TYPE_CATEGORIES.get(post_type, [])
     pool = list(POST_TOPICS)
 
     if used:
@@ -573,24 +635,55 @@ def _pick_topic(post_type: str = "morning", used: set = None) -> str:
         if fresh:
             pool = fresh
         else:
-            # Barcha mavzular ishlatilgan — yangi kundan boshlash
             used.clear()
 
-    topic, angle = random.choice(pool)
+    # avval kategoriya mos mavzular
+    matched = [p for p in pool if p[2] in prefer]
+    if matched:
+        pool = matched
 
-    # post turiga qarab burchakni moslashtiramiz
+    topic, angle, category = random.choice(pool)
+
     type_hint = {
         "morning": "Bugungi kun uchun reja va asosiy e'tibor nuqtalari",
         "noon": "Qisqa tahlil yoki dolzarb savol",
         "evening": "Kun yakuni: xulosa va ertangi kunga tayyorgarlik",
     }.get(post_type, "")
 
-    return f"{topic} — {angle}. {type_hint}".strip()
+    return f"{topic} — {angle}. {type_hint}".strip(), category
 
 
-def _pick_image_style(used: set = None) -> str:
-    """Rasm uslubini tanlaydi (takrorlanmasligi uchun)."""
-    styles = [s for s in IMAGE_STYLES if s[0] not in (used or set())] or IMAGE_STYLES
+def _pick_image_style(used: set = None, category: str = "") -> str:
+    """Rasm uslubini tanlaydi (takrorlanmaslik + kategoriyaga moslik)."""
+    styles = list(IMAGE_STYLES)
+
+    # kategoriyaga mos uslublar (nomlar orqali)
+    hints = {
+        "yangilik": ("trading desk", "financial chart", "stock market",
+                     "data visualization", "smartphone investing"),
+        "foydali": ("data visualization", "financial chart", "abstract finance",
+                    "bank building", "smartphone investing"),
+        "kripto": ("bitcoin coin", "crypto coins", "blockchain cubes",
+                   "financial chart", "golden coins"),
+        "fx": ("currency arrows", "trading terminal", "globe economy",
+               "financial chart", "candlestick chart"),
+        "motivatsiya": ("sunrise mountain", "runner finish", "compass path",
+                        "growth plant", "mountain peak"),
+        "xatolar": ("warning triangle", "broken chart", "stop sign finance",
+                    "abstract finance", "bank building"),
+    }
+    prefer = hints.get(category or "", ())
+
+    if prefer:
+        matched = [s for s in styles if s[0] in prefer]
+        if matched:
+            styles = matched
+
+    if used:
+        fresh = [s for s in styles if s[0] not in used]
+        if fresh:
+            styles = fresh
+
     name, desc = random.choice(styles)
     return f"{name} ({desc})"
 
@@ -762,14 +855,19 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     Hech qachon istisno ko'tarmaydi — AI ishlamasa zaxira matn,
     rasm yaratilmasa None (post rasmsiz chiqadi).
     """
+    category = ""
     if not topic:
-        topic = _pick_topic(post_type, used_topics)
+        topic, category = _pick_topic(post_type, used_topics)
 
     time_context = {
-        "morning": "Bu ertalabki post — kun boshida bozor yangiliklari va reja haqida yozing.",
-        "noon": "Bu tushlikdagi post — qisqa tahlil yoki qiziqarli fakt haqida yozing.",
-        "evening": "Bu kechki post — kun yakuni, xulosa yoki ertangi kunga tayyorgarlik haqida yozing.",
+        "morning": "Bu ertalabki post - kun boshida bozor yangiliklari va reja haqida.",
+        "noon": "Bu tushlikdagi post - qisqa tahlil yoki qiziqarli fakt haqida.",
+        "evening": "Bu kechki post - kun yakuni, xulosa va ertangi kunga tayyorgarlik.",
     }.get(post_type, "")
+
+    # Kategoriya promptga uzatiladi - har post o'z turida chiqadi
+    cat_hint = CATEGORY_HINTS.get(category, "")
+    cat_line = (chr(10) + "Bu postning KATEGORIYASI: " + cat_hint) if cat_hint else ""
 
     # HAR SAFAR BOSHQA prompt: tuzilma, ochilish, ohang va fakt
     # tasodifiy tanlanadi — shuning uchun matn ham doim yangi bo'ldi.
@@ -799,7 +897,7 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     prompt = f"""{SYSTEM_PROMPT}
 
 Bu postning mavzusi: {topic}
-Post turi: {time_context}
+Post turi: {time_context}{cat_line}
 {avoid}
 SHU POST UCHUN QAT'IY KO'RSATMALAR:
 1. Tuzilish: {fmt} - {fmt_desc}
@@ -827,11 +925,12 @@ Shu mavzu bo'yicha tayyor post matnini yoz."""
 
     image = None
     if with_image:
-        image = await generate_image(topic)
+        image = await generate_image(topic, category=category)
         if image:
             image = image[0] if isinstance(image, tuple) else image
 
-    return {"content": cleaned, "image": image, "topic": topic, "source": source}
+    return {"content": cleaned, "image": image, "topic": topic,
+            "category": category, "source": source}
 
 
 async def generate_post_for_topic(topic: str) -> str:
@@ -913,25 +1012,65 @@ VARIANT: <to'rtinchi variant>"""
 
 
 async def improve_post(original: str, feedback: str) -> str:
-    """Admin fikriga ko'ra postni qayta yozadi."""
+    """
+    Admin fikriga ko'ra postni QAYTADAN yozadi.
+
+    Muhim o'zgarishlar (eski kod ishlamaydi edi):
+    1. Eski matn "ESKI MATNNI TAKRORLANG" degan ogohlantirishsiz
+       berilardi — AI ko'pincha aynan o'shanini qaytarardi.
+       Endi uni "faqat manba" sifatida ko'rsatamiz.
+    2. Xato bo'lsa eski matn QAYTARILMASDI — yangi mavzuga
+       ko'ra yoziladi (chunki ma'no "o'zgartirish" edi).
+    3. Tuzilma/ohang yana tasodifiy tanlanadi.
+    """
+    request = (feedback or "").strip()
+    if not request:
+        request = "butunlay boshqa so'zlar bilan qayta yoz, bir xil fikrni takrorlama"
+
+    fmt, fmt_desc = random.choice(POST_FORMATS)
+    opening = random.choice(OPENINGS)
+    tone = random.choice(TONES)
+    seed = random.randint(1000, 9999)
+
+    # Eski matnni QISQARTIRB beramiz — model uni ko'rib ketmasin,
+    # faqat mavzu mazmunini tushishi uchun.
+    old_brief = (original or "").strip()[:280]
+
     prompt = f"""{SYSTEM_PROMPT}
 
-QUYIDAGI POSTNI ADMIN FIKRIGA KO'RA QAYTA YOZING:
+ADMIN SIZGA BUYURMADI: "{request}"
 
-ASL POST:
-{original}
+QOIDALAR:
+1. Yuqoridagi buyruqni BARCHA darajada bajarish shart.
+2. Agar buyruqda yangi mavzu ko'rsatilgan bo'lsa — o'sha mavzu
+   bo'yicha butunlay yangi post yoz.
+3. AGAR buyruq qisqaroq/uzunroq qilishni so'rasa — uzunligini o'zgartir.
+4. Eski matnni TAKRORLAMA. Sarlavha, misol va izoh boshqacha bo'lsin.
+5. Tuzilish: {fmt} — {fmt_desc}
+6. Sarlavha: {opening}
+7. Ohang: {tone}
+8. Uzunligi {450 + seed % 250}-{700 + seed % 200} belgi.
 
-ADMIN FIKRI:
-{feedback}
+MANBA (mavzuni tushish uchun, matnini KOPYALAMANG):
+{old_brief}
 
-Yangi postni yozing (faqat post matnini qaytaring):"""
+Faqat tayyor post matnini qaytaring."""
 
     try:
         text = await _call_with_retry(prompt, "rewrite")
-        return _clean(text)
+        cleaned = _clean(text)
+        if cleaned and not _looks_like_garbage(cleaned, min_len=200):
+            return cleaned
+        raise TransientAIError("qayta yozilgan matn sifatsiz")
     except Exception as e:
-        print(f"❌ Qayta yozib bo'lmadi: {e}")
-        return _clean(original)
+        print(f"❌ Qayta yozib bo'lmadi: {type(e).__name__}: {e}")
+
+    # Zaxira: buyruq matnini o'zi mavzu sifatida ishlatamiz.
+    # Eski matnni QAYTARMASLIGIMIZ kerak — ma'no "o'zgartirish" edi.
+    try:
+        return await generate_post_for_topic(request)
+    except Exception:
+        return ""
 
 
 if __name__ == "__main__":

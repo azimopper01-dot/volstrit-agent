@@ -339,7 +339,7 @@ async def main():
 
     calls_before = CALLS["generate"]
     SENT.clear()
-    pid = await tg.create_and_send_post(post_type="evening")
+    pid = (await tg.create_and_send_post(post_type="evening"))["id"]
     check("AI chaqirilmadi", CALLS["generate"] == calls_before)
     check("post yana ham ADMINGA yuborildi", to_admin())
     check("zaxira matn ishlatildi (to'liq mazmunli)",
@@ -350,7 +350,7 @@ async def main():
     ai.AI_DAILY_LIMIT = 100
     QUOTA_MODE["on"] = True
     before = CALLS["generate"]
-    pid2 = await tg.create_and_send_post(post_type="noon")
+    pid2 = (await tg.create_and_send_post(post_type="noon"))["id"]
     check("PerDay 429 da bir marta urildi, ko'p urilmadi",
           CALLS["generate"] == before + 1,
           f"{CALLS['generate'] - before} urinish")
@@ -389,7 +389,7 @@ async def main():
     ai.AI_MAX_RETRY_WAIT = 1
     ai.AI_MAX_RETRIES = 3
     SENT.clear()
-    pid3 = await tg.create_and_send_post(post_type="morning")
+    pid3 = (await tg.create_and_send_post(post_type="morning"))["id"]
     row3 = await database.get_post(pid3)
     await tg.cb_approve(FakeCallback(f"approve_{pid3}", config.ADMIN_ID))
     row3 = await database.get_post(pid3)
@@ -416,7 +416,7 @@ async def main():
     SENT.clear()
     ai.model = BadModel()
     ai.AI_MAX_RETRIES = 2
-    pid4 = await tg.create_and_send_post(post_type="evening")
+    pid4 = (await tg.create_and_send_post(post_type="evening"))["id"]
     row4 = await database.get_post(pid4)
     content = row4["content"]
     check("prompt-qaytari aniqlanib rad etildi (Checked. yo'q)",
@@ -466,7 +466,7 @@ async def main():
     # ---------- 8. HTML XAVFSIZLIGI ----------
     print("\n8️⃣  AI matnidagi HTML belgilari kanalni buzmaydi")
     SENT.clear()
-    hp = await tg.create_and_send_post(post_type="morning")
+    hp = (await tg.create_and_send_post(post_type="morning"))["id"]
     # tasdiqlash -> kanalga chiqadi
     await tg.cb_approve(FakeCallback(f"approve_{hp}", config.ADMIN_ID))
     chan = [t for c, t in SENT if c == "@VolstritStart"]
@@ -510,30 +510,36 @@ async def main():
     seen = []
     used_t = set()
     for _ in range(10):
-        tp = ai._pick_topic("morning", used_t)
+        tp, _cat = ai._pick_topic("morning", used_t)
         nm = tp.split(" — ")[0]
         used_t.add(nm)
         seen.append(nm)
-    check("mavzular soni kengaygan (>=35)", len(ai.POST_TOPICS) >= 35,
+    check("mavzular soni kengaygan (>=40)", len(ai.POST_TOPICS) >= 40,
           f"{len(ai.POST_TOPICS)} ta")
     check("10 ta ketma-ket mavzudan kamida 9 noyob",
           len(set(seen)) >= 9, f"{len(set(seen))} noyob / 10")
-    check("mavzular 3 ta kishilik har xil burchakka ega",
-          all(" — " in ai._pick_topic("morning", set()) for _ in range(3)))
+    check("mavzular burchakka ega",
+          all(" — " in ai._pick_topic("morning", set())[0] for _ in range(3)))
 
     # ---------- 12. RASM ----------
     print("\n1️⃣2️⃣ Rasm yaratish va yuborish")
     SENT.clear()
     PHOTOS.clear()
     CALLS["image"] = 0
-    rp = await tg.create_and_send_post(post_type="morning")
+    rp = (await tg.create_and_send_post(post_type="morning"))["id"]
     check("AI rasm yaratishga murojaat qildi", CALLS["image"] >= 1,
           f"{CALLS['image']} marta")
     # AUTO_PUBLISH=false -> kanalga chiqish tasdiqlashdan keyin
     check("AUTO_PUBLISH=false: kanalga hali chiqmadi", len(PHOTOS) == 0)
     SENT.clear()
     PHOTOS.clear()
+    # tasdiqlashda rasm YANA yaratiladi (eski rasm saqlanmaydi)
+    ai._get_image_model = lambda: FakeImageModel()
+    ai.AI_IMAGE_DAILY_LIMIT = 50
+    CALLS["image"] = 0
     await tg.cb_approve(FakeCallback(f"approve_{rp}", config.ADMIN_ID))
+    check("tasdiqlashda rasm yaratildi", CALLS["image"] >= 1,
+          f"{CALLS['image']} marta")
     check("tasdiqlashda rasm kanalga yuborildi", len(PHOTOS) >= 1,
           f"{len(PHOTOS)} ta rasm")
     check("rasm ma'lumotlari to'g'ri",
@@ -547,7 +553,7 @@ async def main():
     ai.AI_IMAGE_DAILY_LIMIT = 0
     SENT.clear()
     PHOTOS.clear()
-    qp = await tg.create_and_send_post(post_type="noon")
+    qp = (await tg.create_and_send_post(post_type="noon"))["id"]
     row_q = await database.get_post(qp)
     check("post yana ham yaratildi", row_q is not None)
     check("rasm yuborilmadi (kvota)", len(PHOTOS) == 0)
@@ -563,15 +569,53 @@ async def main():
     ai._get_image_model = broken_model
     SENT.clear()
     PHOTOS.clear()
-    bp = await tg.create_and_send_post(post_type="evening")
+    bp = (await tg.create_and_send_post(post_type="evening"))["id"]
     row_b = await database.get_post(bp)
     check("rasm xatosi postni to'xtatmadi", row_b is not None and to_admin(),
           row_b["status"])
     check("post rasmsiz yuborildi", len(PHOTOS) == 0)
     ai._get_image_model = lambda: FakeImageModel()
 
-    # ---------- 14. PROMPT VAZIFALIGI ----------
-    print("\n1️⃣4️⃣ Har safar boshqa prompt (takrorlanmaslik)")
+    # ---------- 14. KATEGORIYALAR ----------
+    print("\n1️⃣4️⃣ Post kategoriyalari (6 ta tur)")
+    cats = set(p[2] for p in ai.POST_TOPICS)
+    check("6 ta kategoriya mavjud", len(cats) == 6, ", ".join(sorted(cats)))
+    for c in ("yangilik", "foydali", "kripto", "fx", "motivatsiya", "xatolar"):
+        check(f"kategoriya '{c}' mavzu bilan to'ldirilgan",
+              any(p[2] == c for p in ai.POST_TOPICS))
+    check("har bir kategoriyaga tavsif bor",
+          all(c in ai.CATEGORY_HINTS for c in cats))
+
+    # Kunlik reja: 9 ta postda qanchayot turli kategoriya chiqishi kerak
+    seen_cats = set()
+    used_r = set()
+    for i in range(9):
+        t = ["morning", "noon", "evening"][i % 3]
+        tp, cat = ai._pick_topic(t, used_r)
+        used_r.add(tp.split(" — ")[0])
+        seen_cats.add(cat)
+    check("9 ta postda kamida 4 ta turli kategoriya",
+          len(seen_cats) >= 4, f"{len(seen_cats)} ta: {', '.join(sorted(seen_cats))}")
+
+    # Ertalab ko'proq yangilik, kechki ko'proq xato/motivatsiya bo'lishi kerak
+    morning_cats, evening_cats = set(), set()
+    for _ in range(15):
+        morning_cats.add(ai._pick_topic("morning", set())[1])
+        evening_cats.add(ai._pick_topic("evening", set())[1])
+    check("ertalabda yangilik/fx ko'p uchraydi",
+          bool(morning_cats & {"yangilik", "fx"}), str(sorted(morning_cats)))
+    check("kechqurun xato/motivatsiya ko'p uchraydi",
+          bool(evening_cats & {"xatolar", "motivatsiya"}), str(sorted(evening_cats)))
+
+    # ---------- 15. QAYTA YOZISH ----------
+    print("\n1️⃣5️⃣ Qayta yozish eski matnni qaytarmasligi kerak")
+    OLD = "Natija har doim 100% muvaffaqiyat. Faqat shuni qiling." * 8
+    rw = await ai.improve_post(OLD[:600], "kripto yangiliklari haqida yozib ber")
+    check("qayta yozish matn qaytardi", len(rw) > 200, f"{len(rw)} belgi")
+    check("eski matn TAKRORLANMADI", "Natija har doim" not in rw)
+
+    # ---------- NATIJA ----------
+    print("\n1️⃣6️⃣ Har safar boshqa prompt (takrorlanmaslik)")
     combos = set()
     for _ in range(8):
         combos.add((

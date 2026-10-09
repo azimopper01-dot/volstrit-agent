@@ -378,13 +378,18 @@ async def cmd_health(message: Message):
 
 # ===== POST YARATISH =====
 async def create_and_send_post(post_type: str = "morning", topic: str = None,
-                               used_topics: set = None) -> int:
+                               used_topics: set = None) -> dict:
     """
     Post yaratadi (AI matn + rasm) va KANALGA yuboradi.
+
+    Qaytaradi: {"id": int, "topic": str, "content": str}
+    (scheduler mavzuni 'ishlatilgan' deb belgilash uchun ishlatadi)
 
     AUTO_PUBLISH=True  -> darhol kanalga
     AUTO_PUBLISH=False -> avval admonga, "Tasdiqlash"dan keyin kanalga
     """
+    real_topic = topic
+    category = ""
     if topic:
         content = await generate_post_for_topic(topic)
         image = None
@@ -392,8 +397,11 @@ async def create_and_send_post(post_type: str = "morning", topic: str = None,
         res = await generate_post(post_type=post_type, used_topics=used_topics)
         content = res["content"]
         image = res.get("image")
+        real_topic = res.get("topic") or post_type
+        category = res.get("category") or ""
 
-    post_id = await database.save_post(content=content, topic=post_type)
+    post_id = await database.save_post(content=content, topic=real_topic,
+                                       category=category)
 
     sent = None
     if AUTO_PUBLISH:
@@ -421,7 +429,7 @@ async def create_and_send_post(post_type: str = "morning", topic: str = None,
                     parse_mode=ParseMode.HTML,
                     reply_markup=pending_keyboard(post_id),
                 )
-            return post_id
+            return {"id": post_id, "topic": real_topic, "content": content}
 
     # Adminga ko'rish uchun nusxa
     if NOTIFY_ADMIN:
@@ -435,7 +443,7 @@ async def create_and_send_post(post_type: str = "morning", topic: str = None,
         except Exception as e:
             logger.warning("Adminga xabar yuborilmadi: %s", e)
 
-    return post_id
+    return {"id": post_id, "topic": real_topic, "content": content}
 
 
 async def create_and_send_poll() -> int | None:
@@ -502,8 +510,14 @@ async def cb_approve(callback: CallbackQuery):
         image = None
         try:
             from ai_generator import generate_image, _pick_topic
-            topic = post["topic"] or _pick_topic()
-            res = await generate_image(topic)
+            topic = post["topic"] or _pick_topic()[0]
+            # eski bazalarda category yo'q bo'lishi mumkin — shuning
+            # uchun sqlite3.Row da .get() emas, ["category"] ishlatiladi
+            try:
+                cat = post["category"] or ""
+            except (IndexError, KeyError):
+                cat = ""
+            res = await generate_image(topic, category=cat)
             image = res[0] if isinstance(res, tuple) else res
         except Exception as ie:
             logger.warning("Tasdiqlashda rasm yaratilmadi: %s", ie)
@@ -590,11 +604,15 @@ async def cb_rewrite(callback: CallbackQuery):
     post_id = int(callback.data.split("_")[1])
     REWRITE_STATE[callback.from_user.id] = post_id
     await callback.message.answer(
-        f"✏️ <b>Post #{post_id}</b> uchun buyruq bering.\n\n"
-        f"Masalan:\n"
-        f"<code>qisqaroq qil 12</code>\n"
-        f"<code>kripto haqida yozib ber</code>\n"
-        f"<code>boshqa mavzu: neft narxlari</code>\n\n"
+        f"✏️ <b>Post #{post_id}</b> — nima o'zgartirilsin?\n\n"
+        f"Sodda yozing, bot tushunadi:\n"
+        f"• <code>bugungi yangiliklar haqida yoz</code>\n"
+        f"• <code>kripto bozori haqida</code>\n"
+        f"• <code>EUR/USD tahlili</code>\n"
+        f"• <code>qisqaroq qil</code>\n"
+        f"• <code>motivatsionli qilsin</code>\n"
+        f"• <code>trading xatolari haqida</code>\n\n"
+        f"Eski post KANALDA o'chirilib, yangisi qo'yiladi.\n"
         f"Bekor qilish: /cancel",
         parse_mode=ParseMode.HTML
     )
@@ -625,20 +643,14 @@ async def on_admin_text(message: Message):
         await message.answer("❌ Post topilmadi.")
         return
 
-    # "boshqa mavzu: X" yoki "mavzu X" — yangi mavzu sifatida
-    topic = None
-    for marker in ("boshqa mavzu:", "mavzu:", "mavzu "):
-        if feedback.lower().startswith(marker):
-            topic = feedback[len(marker):].strip()
-            feedback = f"Aniq shu mavzu haqida yozib ber: {topic}"
-            break
-
     await message.answer("🤖 Qayta yozilyapti, kuting...")
 
-    if topic:
-        new_content = await generate_post_for_topic(topic)
-    else:
-        new_content = await improve_post(post["content"], feedback)
+    # Muhim: foydalanuvchi erkin matn yozadi ("qisqaroq qil",
+    # "kripto haqida", "bugungi yangiliklar"). Uni shunchaki
+    # AI ga talab sifatida beramiz — AI o'zi moslashadi.
+    # Eski kodda "mavzu " prefiksi izlanardi va ko'p hollarda
+    # ishlamasdi, natijada eski matn qaytardi.
+    new_content = await improve_post(post["content"], feedback)
 
     if not new_content:
         await message.answer("❌ Qayta yozib bo'lmadi. /stats bilan kvotani tekshiring.")

@@ -96,10 +96,31 @@ def _reset_topics():
     _USED_TOPICS = set()
 
 
+def _mark_used(res):
+    """Yaratilgan post mavzusini 'ishlatilgan' deb belgilaydi.
+
+    Bu holda kun ichidagi 3 ta post bir-biriga o'xshamaydi.
+    """
+    global _USED_TOPICS
+    if not res:
+        return res
+    topic = (res.get("topic") or "").split(" — ")[0].strip()
+    if topic:
+        _USED_TOPICS.add(topic)
+    return res
+
+
+async def _make_post(post_type: str):
+    """Post yaratadi va mavzusini 'ishlatilgan' deb belgilaydi."""
+    res = await create_and_send_post(post_type=post_type,
+                                     used_topics=_USED_TOPICS)
+    return _mark_used(res)
+
+
 async def job_morning_post(catch_up: bool = False):
     return await _run_job(
         "morning_post", f"🌅 Ertalabki post ({POST_TIME_MORNING})",
-        lambda: create_and_send_post(post_type="morning", used_topics=_USED_TOPICS),
+        lambda: _make_post("morning"),
         catch_up
     )
 
@@ -107,7 +128,7 @@ async def job_morning_post(catch_up: bool = False):
 async def job_noon_post(catch_up: bool = False):
     return await _run_job(
         "noon_post", f"☀️ Tushlikdagi post ({POST_TIME_NOON})",
-        lambda: create_and_send_post(post_type="noon", used_topics=_USED_TOPICS),
+        lambda: _make_post("noon"),
         catch_up
     )
 
@@ -115,7 +136,7 @@ async def job_noon_post(catch_up: bool = False):
 async def job_evening_post(catch_up: bool = False):
     return await _run_job(
         "evening_post", f"🌆 Kechki post ({POST_TIME_EVENING})",
-        lambda: create_and_send_post(post_type="evening", used_topics=_USED_TOPICS),
+        lambda: _make_post("evening"),
         catch_up
     )
 

@@ -110,16 +110,25 @@ async def init_db():
             )
         """)
 
+        # Migratsiya: eski bazalarda "category" ustuni yo'q bo'lishi mumkin
+        cur = await db.execute("PRAGMA table_info(posts)")
+        cols = {r[1] for r in await cur.fetchall()}
+        if "category" not in cols:
+            await db.execute(
+                "ALTER TABLE posts ADD COLUMN category TEXT DEFAULT ''"
+            )
+            print("🔄 posts jadvaliga 'category' ustuni qo'shildi")
+
         await db.commit()
     print("✅ Ma'lumotlar bazasi tayyor.")
 
 
 # ===== POSTLAR =====
-async def save_post(content: str, topic: str = "") -> int:
+async def save_post(content: str, topic: str = "", category: str = "") -> int:
     async with aiosqlite.connect(DB_PATH) as db:
         cur = await db.execute(
-            "INSERT INTO posts (content, topic, created_at) VALUES (?, ?, ?)",
-            (content, topic, now_iso())
+            "INSERT INTO posts (content, topic, category, created_at) VALUES (?, ?, ?, ?)",
+            (content, topic, category or "", now_iso())
         )
         await db.commit()
         return cur.lastrowid
