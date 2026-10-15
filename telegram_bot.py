@@ -400,6 +400,18 @@ async def create_and_send_post(post_type: str = "morning", topic: str = None,
         real_topic = res.get("topic") or post_type
         category = res.get("category") or ""
 
+    # ===== YAKUNIY HIMOYA =====
+    # generate_post() allaqachon tekshirgan, lekin /schedule va
+    # qayta yozish yo'llari uchun ham tekshiramiz: kanalga BIR XIL
+    # ikki marta post chiqmasin.
+    dup, sim = await database.is_duplicate(content)
+    if dup:
+        print(f"⚠️  Yakuniy tekshiruv: {int(sim * 100)}% o'xshash — "
+              f"zaxira matn bilan almashtiriladi")
+        alt = await database.get_next_fallback(post_type)
+        if alt:
+            content = alt
+
     post_id = await database.save_post(content=content, topic=real_topic,
                                        category=category)
 
@@ -650,10 +662,30 @@ async def on_admin_text(message: Message):
     # AI ga talab sifatida beramiz — AI o'zi moslashadi.
     # Eski kodda "mavzu " prefiksi izlanardi va ko'p hollarda
     # ishlamasdi, natijada eski matn qaytardi.
-    new_content = await improve_post(post["content"], feedback)
+    new_content = await improve_post(post["content"], feedback,
+                                   exclude_id=post_id)
 
     if not new_content:
-        await message.answer("❌ Qayta yozib bo'lmadi. /stats bilan kvotani tekshiring.")
+        await message.answer(
+            "❌ Qayta yozib bo'lmadi.\n"
+            "Sabab: AI kvota tugagan bo'lishi mumkin.\n"
+            "Bir oz kutib, yana urinib ko'ring."
+        )
+        return
+
+    # ===== YAKUNIY HIMOYA =====
+    # AI barcha urinishlardan keyin ham eskisini qaytargan bo'lsa,
+    # kanalga TAKROR post chiqmasligi kerak.
+    from ai_generator import _looks_like_same
+    if _looks_like_same(new_content, post["content"], threshold=0.45):
+        await message.answer(
+            "⚠️ AI eski matnni o'zgartirmay qaytardi.\n\n"
+            "Mavzuni aniqroq yozing, masalan:\n"
+            "<code>kripto bozori haqida yoz</code>\n"
+            "<code>EUR/USD tahlili</code>\n"
+            "<code>trading xatolari haqida</code>",
+            parse_mode=ParseMode.HTML
+        )
         return
 
     # Eski kanal xabarini o'chirib, yangisini yuboramiz
@@ -665,10 +697,31 @@ async def on_admin_text(message: Message):
             pass
 
     try:
-        sent = await safe_send(CHANNEL_ID, new_content)
-        await database.update_post_status(post_id, "sent", message_id=sent.message_id)
+        # Rasm ham qayta yaratiladi
+        image = None
+        try:
+            from ai_generator import generate_image
+            try:
+                cat = post["category"] or ""
+            except (IndexError, KeyError):
+                cat = ""
+            res = await generate_image(post["topic"] or "finance",
+                                        category=cat)
+            image = res[0] if isinstance(res, tuple) else res
+        except Exception as ie:
+            logger.warning("Rasm yaratilmadi: %s", ie)
+
+        if image:
+            sent = await safe_send_photo(CHANNEL_ID, image, new_content)
+        else:
+            sent = await safe_send(CHANNEL_ID, new_content)
+
+        await database.update_post_content(post_id, new_content)
+        await database.update_post_status(post_id, "sent",
+                                          message_id=sent.message_id)
+        tail = " 🎨" if image else ""
         await message.answer(
-            f"✅ Post #{post_id} qayta yozildi va kanalga yangilandi!",
+            f"✅ Post #{post_id} qayta yozildi va kanalga yangilandi{tail}!",
             reply_markup=published_keyboard(post_id),
         )
     except Exception as e:

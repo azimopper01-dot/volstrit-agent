@@ -47,6 +47,9 @@ class TransientAIError(Exception):
 genai.configure(api_key=GEMINI_API_KEY)
 model = genai.GenerativeModel(GEMINI_MODEL)
 
+# Post takror bo'lsa, necha marta qayta urish kerak
+MAX_DUPLICATE_RETRIES = 3
+
 GEN_CONFIG = {
     # Yuqori temperatura = har safar boshqacha matn.
     # Pastda (0.7-0.9) model bir xil javobni takrorlab beradi.
@@ -615,6 +618,37 @@ TYPE_CATEGORIES = {
 }
 
 
+def _looks_like_same(new_text: str, old_text: str, threshold: float = 0.45) -> bool:
+    """
+    Yangi matn eskisi bilan bir xarlimi?
+
+    Bu "Qayta yozish" da eng muhimi: AI ko'pincha o'zgartirish o'rniga
+    eski matnni o'z-o'zidan qaytarib beradi. Shu funksiya buni ushlaydi.
+    """
+    if not new_text or not old_text:
+        return False
+
+    a = database._fingerprint(new_text)
+    b = database._fingerprint(old_text)
+    if not a or not b:
+        return False
+
+    inter = len(a & b)
+    if not inter:
+        return False
+
+    sim = inter / min(len(a), len(b))
+
+    # aniq bir xil sarlavha — eng kuchli belgi
+    h1 = (new_text or "").strip().split("\n")[0].strip().lower()
+    h2 = (old_text or "").strip().split("\n")[0].strip().lower()
+    same_heading = bool(h1) and h1 == h2
+
+    if sim >= 0.75 or same_heading:
+        return True
+    return sim >= threshold
+
+
 def _pick_topic(post_type: str = "morning", used: set = None):
     """
     Mavzuni tanlaydi va QAYTARADI:
@@ -869,13 +903,8 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     cat_hint = CATEGORY_HINTS.get(category, "")
     cat_line = (chr(10) + "Bu postning KATEGORIYASI: " + cat_hint) if cat_hint else ""
 
-    # HAR SAFAR BOSHQA prompt: tuzilma, ochilish, ohang va fakt
-    # tasodifiy tanlanadi — shuning uchun matn ham doim yangi bo'ldi.
-    fmt, fmt_desc = random.choice(POST_FORMATS)
-    opening = random.choice(OPENINGS)
-    tone = random.choice(TONES)
-    fact = random.choice(FACT_HINTS)
-    seed = random.randint(1000, 9999)
+    # Tuzilma/ohang/burchak quyidagi siklda har safar QAYTA tanlanadi
+    # (takror chiqsa — yangisi bilan qayta uriladi)
 
     # Yaqinda chiqarilgan postlarni ko'rsatamiz — model ularni
     # TAKRORLAMASLIGI kerak. Bu "har safar yangi"ning asosiy kaliti.
@@ -894,12 +923,36 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     except Exception:
         pass
 
-    prompt = f"""{SYSTEM_PROMPT}
+    source = "AI"
+    cleaned = ""
+
+    # ===== DUPLIKATGA QARSHI ZAHIRA =====
+    # AI bir marta chaqirilmaydi — bir necha marta uriladi va har
+    # safar natija bazadagi eski postlar bilan solishtiriladi.
+    # O'xshash chiqsa, yangi mavzu + boshqa uslub bilan qayta uriladi.
+    for attempt in range(1, MAX_DUPLICATE_RETRIES + 1):
+        # har urishda tuzilma/ohang/burchak QAYTA tanlanadi
+        fmt, fmt_desc = random.choice(POST_FORMATS)
+        opening = random.choice(OPENINGS)
+        tone = random.choice(TONES)
+        fact = random.choice(FACT_HINTS)
+        seed = random.randint(1000, 9999)
+
+        if attempt > 1:
+            topic, category = _pick_topic(post_type, used_topics)
+            if used_topics is not None:
+                used_topics.add(topic.split(" — ")[0].strip())
+            cat_hint = CATEGORY_HINTS.get(category, "")
+            cat_line = (
+                "\nBu postning KATEGORIYASI: " + cat_hint if cat_hint else ""
+            )
+
+        prompt = f"""{SYSTEM_PROMPT}
 
 Bu postning mavzusi: {topic}
 Post turi: {time_context}{cat_line}
 {avoid}
-SHU POST UCHUN QAT'IY KO'RSATMALAR:
+SHU POST UCHIN QAT'IY KO'RSATMALAR:
 1. Tuzilish: {fmt} - {fmt_desc}
 2. Sarlavha uslubi: {opening}
 3. Ohang: {tone}
@@ -910,17 +963,36 @@ SHU POST UCHUN QAT'IY KO'RSATMALAR:
 
 Shu mavzu bo'yicha tayyor post matnini yoz."""
 
-    source = "AI"
-    try:
-        text = await _call_with_retry(prompt, f"post/{post_type}")
-        cleaned = _clean(text)
-        if not cleaned:
-            raise TransientAIError("bo'sh matn")
-    except (QuotaExhausted, TransientAIError) as e:
-        cleaned = _fallback(post_type, str(e), used_topics)
-        source = "zaxira"
-    except Exception as e:
-        cleaned = _fallback(post_type, f"{type(e).__name__}: {e}", used_topics)
+        try:
+            text = await _call_with_retry(prompt, f"post/{post_type}")
+            cleaned = _clean(text)
+            if not cleaned:
+                raise TransientAIError("bo'sh matn")
+        except (QuotaExhausted, TransientAIError) as e:
+            # AI ishlamaydi — zaxiraga o'tamiz, qayta urishning ma'nosiz
+            cleaned = _fallback(post_type, str(e), used_topics)
+            source = "zaxira"
+            break
+        except Exception as e:
+            cleaned = _fallback(post_type, f"{type(e).__name__}: {e}",
+                               used_topics)
+            source = "zaxira"
+            break
+
+        # ===== DUPLIKAT TEKSHIRUVI =====
+        dup, sim = await database.is_duplicate(cleaned)
+        if not dup:
+            print(f"   🔍 O'xshashlik: {int(sim * 100)}% — yangi post OK")
+            break
+
+        # takror chiqdi — boshqa uslub bilan qayta uramiz
+        print(f"   ⚠️  O'xshashlik {int(sim * 100)}% — boshqa uslub bilan "
+              f"qayta yoziladi ({attempt}/{MAX_DUPLICATE_RETRIES})")
+
+    # Hamma urishda takror bo'lsa — zaxiraga o'tamiz (eski matnni QAYTARMAYmiz)
+    else:
+        cleaned = _fallback(post_type, "AI har safar takror qildi",
+                            used_topics)
         source = "zaxira"
 
     image = None
@@ -935,19 +1007,22 @@ Shu mavzu bo'yicha tayyor post matnini yoz."""
 
 async def generate_post_for_topic(topic: str) -> str:
     """Aniq mavzu bo'yicha post (real vaqtda berilgan vazifa uchun)."""
-    # /schedule orqali kelgan mavzu ham tasodifiy uslub oladi —
-    # aks holda u avvalgi postlarga o'xshab qoladi.
-    fmt, fmt_desc = random.choice(POST_FORMATS)
-    opening = random.choice(OPENINGS)
-    tone = random.choice(TONES)
-    seed = random.randint(1000, 9999)
+    cleaned = ""
 
-    prompt = f"""{SYSTEM_PROMPT}
+    # /schedule yo'li ham takrorlanmaslik himoyasidan o'tadi:
+    # mavzu bir xil bo'lsa ham, matn boshqacha bo'lishi SHART.
+    for attempt in range(1, MAX_DUPLICATE_RETRIES + 1):
+        fmt, fmt_desc = random.choice(POST_FORMATS)
+        opening = random.choice(OPENINGS)
+        tone = random.choice(TONES)
+        seed = random.randint(1000, 9999)
+
+        prompt = f"""{SYSTEM_PROMPT}
 
 Bu postning mavzusi: {topic}
 
 SHU POST UCHUN KO'RSATMALAR:
-- Tuzilish: {fmt} — {fmt_desc}
+- Tuzilish: {fmt} - {fmt_desc}
 - Sarlavha: {opening}
 - Ohang: {tone}
 - Boshqa postlardan butunlay boshqacha bo'lsin
@@ -955,14 +1030,24 @@ SHU POST UCHUN KO'RSATMALAR:
 
 Shu mavzu bo'yicha tayyor post matnini yoz."""
 
-    try:
-        text = await _call_with_retry(prompt, "post/adhoc")
-        cleaned = _clean(text)
-        return cleaned or _fallback("default", "bo'sh matn")
-    except (QuotaExhausted, TransientAIError) as e:
-        return _fallback("default", str(e))
-    except Exception as e:
-        return _fallback("default", f"{type(e).__name__}: {e}")
+        try:
+            text = await _call_with_retry(prompt, "post/adhoc")
+            cleaned = _clean(text)
+            if not cleaned:
+                raise TransientAIError("bo'sh matn")
+        except (QuotaExhausted, TransientAIError) as e:
+            return _fallback("default", str(e))
+        except Exception as e:
+            return _fallback("default", f"{type(e).__name__}: {e}")
+
+        dup, sim = await database.is_duplicate(cleaned)
+        if not dup:
+            return cleaned
+
+        print(f"   ⚠️  O'xshashlik {int(sim * 100)}% — qayta yoziladi "
+              f"({attempt}/{MAX_DUPLICATE_RETRIES})")
+
+    return _fallback("default", "AI har safar takror qildi")
 
 
 async def generate_poll() -> Optional[dict]:
@@ -1011,32 +1096,38 @@ VARIANT: <to'rtinchi variant>"""
         return None
 
 
-async def improve_post(original: str, feedback: str) -> str:
+async def improve_post(original: str, feedback: str,
+                       exclude_id: int = None) -> str:
     """
     Admin fikriga ko'ra postni QAYTADAN yozadi.
 
-    Muhim o'zgarishlar (eski kod ishlamaydi edi):
-    1. Eski matn "ESKI MATNNI TAKRORLANG" degan ogohlantirishsiz
-       berilardi — AI ko'pincha aynan o'shanini qaytarardi.
-       Endi uni "faqat manba" sifatida ko'rsatamiz.
-    2. Xato bo'lsa eski matn QAYTARILMASDI — yangi mavzuga
-       ko'ra yoziladi (chunki ma'no "o'zgartirish" edi).
-    3. Tuzilma/ohang yana tasodifiy tanlanadi.
+    Muhim: qayta yozilgan matn ESKI matnning o'zi bo'lmasligi SHART.
+    Shuuning uchun:
+      1) eski matn qisqartirilib "manba" sifatida beriladi
+      2) har urishda tuzilma/ohang/burchak QAYTA tanlanadi
+      3) natija bazadagi eski postlar bilan SOLISHTIRILADI
+         (is_duplicate) — o'xshash bo'lsa yana uriladi
+      4) hech qanday holatda eski matn QAYTARILMAYDI
     """
     request = (feedback or "").strip()
     if not request:
-        request = "butunlay boshqa so'zlar bilan qayta yoz, bir xil fikrni takrorlama"
-
-    fmt, fmt_desc = random.choice(POST_FORMATS)
-    opening = random.choice(OPENINGS)
-    tone = random.choice(TONES)
-    seed = random.randint(1000, 9999)
+        request = ("butunlay boshqa so'zlar bilan qayta yoz, "
+                   "bir xil fikrni takrorlama")
 
     # Eski matnni QISQARTIRB beramiz — model uni ko'rib ketmasin,
     # faqat mavzu mazmunini tushishi uchun.
     old_brief = (original or "").strip()[:280]
 
-    prompt = f"""{SYSTEM_PROMPT}
+    cleaned = ""
+    for attempt in range(1, MAX_DUPLICATE_RETRIES + 1):
+        # har urishda boshqa uslub
+        fmt, fmt_desc = random.choice(POST_FORMATS)
+        opening = random.choice(OPENINGS)
+        tone = random.choice(TONES)
+        fact = random.choice(FACT_HINTS)
+        seed = random.randint(1000, 9999)
+
+        prompt = f"""{SYSTEM_PROMPT}
 
 ADMIN SIZGA BUYURMADI: "{request}"
 
@@ -1046,27 +1137,43 @@ QOIDALAR:
    bo'yicha butunlay yangi post yoz.
 3. AGAR buyruq qisqaroq/uzunroq qilishni so'rasa — uzunligini o'zgartir.
 4. Eski matnni TAKRORLAMA. Sarlavha, misol va izoh boshqacha bo'lsin.
-5. Tuzilish: {fmt} — {fmt_desc}
+5. Tuzilish: {fmt} - {fmt_desc}
 6. Sarlavha: {opening}
 7. Ohang: {tone}
-8. Uzunligi {450 + seed % 250}-{700 + seed % 200} belgi.
+8. Qo'shimcha fikr: {fact}
+9. Uzunligi {450 + seed % 250}-{700 + seed % 200} belgi.
 
 MANBA (mavzuni tushish uchun, matnini KOPYALAMANG):
 {old_brief}
 
 Faqat tayyor post matnini qaytaring."""
 
-    try:
-        text = await _call_with_retry(prompt, "rewrite")
-        cleaned = _clean(text)
-        if cleaned and not _looks_like_garbage(cleaned, min_len=200):
-            return cleaned
-        raise TransientAIError("qayta yozilgan matn sifatsiz")
-    except Exception as e:
-        print(f"❌ Qayta yozib bo'lmadi: {type(e).__name__}: {e}")
+        try:
+            text = await _call_with_retry(prompt, "rewrite")
+            cleaned = _clean(text)
+            if not cleaned or _looks_like_garbage(cleaned, min_len=200):
+                raise TransientAIError("qayta yozilgan matn sifatsiz")
+        except Exception as e:
+            print(f"❌ Qayta yozib bo'lmadi: {type(e).__name__}: {e}")
+            break
 
-    # Zaxira: buyruq matnini o'zi mavzu sifatida ishlatamiz.
-    # Eski matnni QAYTARMASLIGIMIZ kerak — ma'no "o'zgartirish" edi.
+        # ===== ASOSIY TEKSHIRUV: eski matn QAYTMADIMI? =====
+        # 1) o'sh postga nisbatan (boshqa postlarga emas)
+        dup_self = _looks_like_same(cleaned, original, threshold=0.45)
+        # 2) boshqa yozilgan postlarga nisbatan — eski post chiqarilgan,
+        #    aks holda bu har doim "takror" bo'lib chiqardi
+        dup_other, sim = await database.is_duplicate(cleaned, exclude_id=exclude_id)
+
+        if not dup_self and not dup_other:
+            print(f"   🔍 O'xshashlik {int(sim * 100)}% — yangi post OK")
+            return cleaned
+
+        print(f"   ⚠️  Takror chiqdi ({int(sim * 100)}%) — "
+              f"qayta yoziladi ({attempt}/{MAX_DUPLICATE_RETRIES})")
+
+    # Hamma urishda takror bo'lsa — buyruq matnidan butunlay
+    # YANGI mavzu yozamiz. Eski matnni QAYTARMASLIGIMIZ kerak.
+    print("🔄 Buyruq matnidan yangi mavzu yozilmoqda...")
     try:
         return await generate_post_for_topic(request)
     except Exception:

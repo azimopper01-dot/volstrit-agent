@@ -171,6 +171,19 @@ async def update_post_status(
         )
 
 
+async def update_post_content(post_id: int, content: str):
+    """Qayta yozilgan postning matnini yangilaydi.
+
+    Muhim: eski matn o'rniga yoziladi — shunda keyingi
+    duplikat tekshiruvlarda ESKI matn solishtirilmaydi
+    (aks holda "qayta yozish" har doim takror deb hisoblanardi).
+    """
+    await _execute(
+        "UPDATE posts SET content = ?, created_at = ? WHERE id = ?",
+        (content, now_iso(), post_id)
+    )
+
+
 async def get_pending_posts():
     return await _query_all(
         "SELECT * FROM posts WHERE status = 'pending' ORDER BY created_at DESC LIMIT 20"
@@ -199,6 +212,118 @@ async def get_recent_topics(limit: int = 5):
         "SELECT topic FROM posts WHERE topic IS NOT NULL AND topic != '' "
         "ORDER BY created_at DESC LIMIT ?", (limit,)
     )
+
+
+# ===== TAKRORLANMASLIK (DUPLIKAT TEKSHIRUVI) =====
+# Muhim: post bitta martaba yozilishi SHART. Ikki qatlamli himoya:
+#   1) so'z fingerprint — matn o'xshashmi
+#   2) mavzu tarixi — mavzu allaqachon ishlatilganmi
+
+
+def _fingerprint(text: str) -> set:
+    """
+    Matndan kalit so'zlarni ajratadi — taqqoslash uchun.
+
+    Har 2 so'zdan bitta "jumla" yasaydi: "bozor harakati" kabi.
+    Shu bilan "bozorda harakat" va "harakat bozor" farqlanadi,
+    lekin ikkalasi ham bir xil deb hisoblanadi.
+    """
+    import re as _re
+    words = _re.findall(r"[a-z0-9']{3,}", (text or "").lower())
+    stop = {
+        "ham", "bilan", "uchun", "bo'lib", "buni", "shu", "bir", "bu",
+        "ammo", "yoki", "kerak", "bo'lsa", "shuning", "keyin", "oldin",
+        "qanday", "nima", "qilib", "bo'lgan", "har", "barcha", "shu",
+    }
+    words = [w for w in words if w not in stop]
+    return {" ".join(words[i:i + 2]) for i in range(len(words) - 1)}
+
+
+async def is_duplicate(content: str, threshold: float = 0.55,
+                       exclude_id: int = None) -> tuple:
+    """
+    Matn avval yozilganmi?
+
+    exclude_id — shu postni solishtirishdan chiqaradi. Bu "qayta
+    yozish"da kerak: eski matn o'rniga yangisi yoziladi, agar eskisini
+    ham solishtirsa, har doim "takror" deb hisoblanardi.
+
+    Qaytaradi: (bool_dublikat, o'xshashlik_darajasi)
+    """
+    fp = _fingerprint(content)
+    if not fp:
+        return False, 0.0
+
+    sql = ("SELECT content FROM posts WHERE status != 'rejected' "
+           "ORDER BY created_at DESC LIMIT 200")
+    params = ()
+    if exclude_id is not None:
+        sql = ("SELECT content FROM posts WHERE status != 'rejected' "
+               "AND id != ? ORDER BY created_at DESC LIMIT 200")
+        params = (exclude_id,)
+
+    rows = await _query_all(sql, params)
+
+    best = 0.0
+    for r in rows:
+        other = _fingerprint(r["content"] or "")
+        if not other:
+            continue
+        inter = len(fp & other)
+        if not inter:
+            continue
+        # Jaccard o'xshashlik
+        sim = inter / min(len(fp), len(other))
+        if sim > best:
+            best = sim
+            if best >= threshold:
+                break
+
+    return best >= threshold, round(best, 3)
+
+
+async def get_used_topics(days: int = 30) -> set:
+    """Oxirgi N kun ichida ishlatilgan mavzular (barchasi, eskirganlar ham)."""
+    rows = await _query_all(
+        "SELECT topic FROM posts WHERE topic IS NOT NULL AND topic != '' "
+        "AND created_at > datetime('now', ?) "
+        "ORDER BY created_at DESC", (f"-{days} days",)
+    )
+    return {(r["topic"] or "").split(" — ")[0].split(" - ")[0].strip()
+            for r in rows if r["topic"]}
+
+
+async def get_next_fallback(post_type: str = "morning") -> str:
+    """
+    Ishlatilmagan zaxira matnni qaytaradi (takror bo'lmasligi uchun).
+
+    Zaxira matnlar ro'yxati ai_generator ichida, shuning uchun
+    bu yerda faqat bazadagi yozilgan matnlarni taqqoslaymiz.
+    """
+    try:
+        from ai_generator import FALLBACK_POSTS
+    except Exception:
+        return ""
+
+    bank = FALLBACK_POSTS.get(post_type) or FALLBACK_POSTS["default"]
+    rows = await _query_all("SELECT content FROM posts ORDER BY created_at DESC")
+
+    for cand in bank:
+        fp = _fingerprint(cand)
+        if not fp:
+            continue
+        used = False
+        for r in rows:
+            other = _fingerprint(r["content"] or "")
+            if not other:
+                continue
+            if len(fp & other) / min(len(fp), len(other)) >= 0.55:
+                used = True
+                break
+        if not used:
+            return cand
+
+    return ""
 
 
 async def get_today_posts_count() -> int:

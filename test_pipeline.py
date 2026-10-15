@@ -323,7 +323,8 @@ async def main():
     CALLS["generate"] = 0
     SENT.clear()
     await sch.run_adhoc_tasks()
-    check("muddati kelgan vazifa bajarildi (AI chaqirildi)", CALLS["generate"] == 1)
+    check("muddati kelgan vazifa bajarildi (AI chaqirildi)",
+          CALLS["generate"] >= 1, f"{CALLS['generate']} marta")
     check("bajarilgan vazifa 'ok' belgilandi, kelgusi kutilmoqda",
           len(await database.get_pending_adhoc_tasks()) == 1)
     check("vazifa natijasi ADMINGA yuborildi", to_admin())
@@ -644,6 +645,50 @@ async def main():
     # promptga avvalgi postlar kiritiladimi (takrorlanmaslik uchun)
     check("bazada avvalgi postlar olinishi mumkin",
           hasattr(database, "get_recent_posts"))
+
+    # ---------- 17. DUPLIKAT TEKSHIRUVI ----------
+    print("\n1️⃣7️⃣ Takrorlanmaslik (bir marta yozilgan qayta yozilmaydi)")
+    A = ("Likvidlik degani nimani anglatadi? Likvidlik aynan shu aktivi qancha "
+         "tez va qancha hajmda sotib olish mumkinligi. Agar likvidlik past "
+         "bolsa katta order narxni tez suradi. Bolor muammosi shundaki "
+         "kopinchilik kuchayadi va yaxshi tanlov yaxshilik.")
+    B = ("EUR/USD juftligi bozor ichida eng faol juftlik hisoblanadi. U kop "
+         "investorlar tomonidan kuzatiladi. Dollar kuchayishi yoki "
+         "bolishiga qarab kurs o zgaradi. Markaziy bank qarorlari ham "
+         "kursga ta sir qiladi. Yangi boshlovchilar uchun xavfni belgilash.")
+    pid_a = await database.save_post(A, "likvidlik", "foydali")
+
+    # B hali bazada YO'Q — shuning uchun dublikat bo'lmasligi kerak
+    dup2, sim2 = await database.is_duplicate(B)
+    check("boshqa matn = dublikat EMAS", not dup2, f"{int(sim2 * 100)}%")
+
+    # endi saqlaymiz — endi topilishi kerak
+    await database.save_post(B, "eurusd", "fx")
+    dupB, simB = await database.is_duplicate(B)
+    check("saqlangan matn keyin dublikat topildi", dupB, f"{int(simB * 100)}%")
+
+    dup1, sim1 = await database.is_duplicate(A)
+    check("bir xil matn = dublikat", dup1, f"{int(sim1 * 100)}%")
+    dup3, sim3 = await database.is_duplicate(A, exclude_id=pid_a)
+    check("exclude_id o'sh postni chiqaradi", not dup3, f"{int(sim3 * 100)}%")
+
+    check("bir xil matn bir xil fingerprint",
+          database._fingerprint(A) == database._fingerprint(A))
+    check("boshqa matn boshqa fingerprint",
+          database._fingerprint(A) != database._fingerprint(B))
+
+    check("_looks_like_same: bir xil matn = True",
+          ai._looks_like_same(A, A, 0.45))
+    check("_looks_like_same: boshqa matn = False",
+          not ai._looks_like_same(B, A, 0.45))
+
+    alt = await database.get_next_fallback("morning")
+    check("ishlatilmagan zaxira matn topildi", len(alt) > 200, f"{len(alt)} belgi")
+
+    await database.update_post_content(pid_a, "yangi matn boshqacha")
+    row = await database.get_post(pid_a)
+    check("qayta yozilgan post matni yangilandi",
+          row["content"] == "yangi matn boshqacha")
 
     # ---------- NATIJA ----------
     print("\n" + "=" * 68)
