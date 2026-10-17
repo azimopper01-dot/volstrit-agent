@@ -102,7 +102,15 @@ GEMINI_TIMEOUT = _env_int("GEMINI_TIMEOUT", 120)
 GEMINI_MAX_OUTPUT_TOKENS = _env_int("GEMINI_MAX_OUTPUT_TOKENS", 1000)
 
 # Google free-tier chegaralari: 5 so'rov/daqiqa, 20 so'rov/kun.
-# Biz chegara chegarasiga tegmaslik uchun biroz pastroq qiymat qo'yamiz.
+#
+# DIQQAT: 20/kun — BU butun API hisobining chegarasi (rasmlar bilan
+# birga). Botning o'z chegarasi 14 qo'yiladi va `ai_budget_left()`
+# qolgan so'rovlar bo'yicha TAKROR URISHLARNI KAMAYTIRADI — aks holda
+# 3 post x 3 urish = 9, + viktorina va rasmlar bilan chegani oshib
+# ketardi. Unda qolgan postlar statik zaxira matnga tushib qolardi
+# (foydalanuvchining "postlar takrorlanadi" shikoyatining sababi).
+#
+# To'lov rejasi yoqilsa, bu qiymatlarni ko'tarish mumkin.
 AI_MAX_RETRIES = _env_int("AI_MAX_RETRIES", 3)
 AI_RETRY_BASE_DELAY = _env_int("AI_RETRY_BASE_DELAY", 5)
 AI_DAILY_LIMIT = _env_int("AI_DAILY_LIMIT", 14)

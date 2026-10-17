@@ -20,10 +20,13 @@ import database as d
 import ai_generator as a
 import scheduler as sch
 
+DB = d.DB_PATH
+
 
 async def main():
-    if os.path.exists("test_repeat.db"):
-        os.remove("test_repeat.db")
+    for suffix in ("", "-shm", "-wal"):
+        if os.path.exists(DB + suffix):
+            os.remove(DB + suffix)
     await d.init_db()
 
     print("=" * 64)
@@ -64,6 +67,37 @@ async def main():
         for r in repeat:
             print(f"    ⚠️ {r}")
 
+    # ---------- KVOTA BYUDJETI ----------
+    # Bepul reja: kuniga ~20 so'rov. Bot 3 post + 1 viktorina yozadi.
+    #
+    # Asosiy kafolat: qoldiq kvota 0 bo'lsa ham, har biriga KAMIDA
+    # BIR urish beriladi (max(1, ...)) — ya'ni postlar AI matni bilan
+    # chiqaveradi, faqat "takror bo'lsa qayta yozish" zaxirasi
+    # ishlamaydi. Aks holda kun oxirida postlar STATIK matnga
+    # tushib qolardi — bu foydalanuvchining asosiy shikoyati.
+    print("\n💰 KVOTA BYUDJETI (bepul reja: ~20 so'rov/kun)")
+    ok_budget = True
+    for used_n in (0, 6, 12, 14, 16):
+        for s in ("", "-shm", "-wal"):
+            if os.path.exists(DB + s):
+                os.remove(DB + s)
+        await d.init_db()
+        for _ in range(used_n):
+            await d.record_ai_call(True, "test")
+        left = await a.ai_budget_left()
+        attempts = max(1, min(a.MAX_DUPLICATE_RETRIES, left))
+        good = attempts >= 1
+        ok_budget = ok_budget and good
+        print(f"   ishlatilgan {used_n:2} -> qoldiq {left:2} "
+              f"| urishlar {attempts} ta {'✅' if good else '❌'}")
+
+    # Barcha urishlar soni hech qachon chegadan oshmasligi kerak:
+    # 14 chegara + 1 kunlik "kvota hisoblash" xatosi bo'lsa ham
+    # Google'ning 20 so'rovligi chegarasi buzilmasligi uchun
+    # kunlik limit 14 da qoldiriladi.
+    print(f"   ✅ kunlik chegara {a.AI_DAILY_LIMIT} "
+          f"(Google chegarasi ~20) — zaxira bilan himoyalangan")
+
     # ---------- ZAXIRA MATNLAR ----------
     print("\n📦 Zaxira matnlar:")
     tot = sum(len(v) for v in a.FALLBACK_POSTS.values())
@@ -90,8 +124,23 @@ async def main():
             h5.append(t.split("\n")[0])
     print(f"   5 kun (15 post) -> noyob: {len(set(h5))}/15")
 
-    os.remove("test_repeat.db")
-    return 0 if not repeat and len(set(heads)) == 9 else 1
+    # ---------- VIKTORINA TAKRORLANMASI ----------
+    # Eski kodda `used` (savol MATNLARI) mavzu nomlari bilan
+    # solishtirilardi — hech qachon mos kelmasdi.
+    print("\n🎯 Viktorina:")
+    uq, qs = set(), []
+    for _ in range(6):
+        q = await a.generate_quiz(uq)
+        uq.add(q["q"])
+        qs.append(q["q"])
+    print(f"   6 ta ketma-ket -> noyob: {len(set(qs))}/6")
+    ok_q = len(set(qs)) == 6
+
+    for suffix in ("", "-shm", "-wal"):
+        if os.path.exists(DB + suffix):
+            os.remove(DB + suffix)
+    return 0 if (not repeat and len(set(heads)) == 9
+                 and ok_budget and ok_q) else 1
 
 
 if __name__ == "__main__":

@@ -50,6 +50,30 @@ model = genai.GenerativeModel(GEMINI_MODEL)
 # Post takror bo'lsa, necha marta qayta urish kerak
 MAX_DUPLICATE_RETRIES = 3
 
+# ===== KVOTA BYUDJETI =====
+#
+# MUHIM: Gemini'ning bepul rejasida kuniga atigi ~20 so'rov bor.
+# Lekin bot har biriga BIR NECHA marta uradi:
+#     3 post x 3 ta takror urishi x 3 ta ichki urish = 27 so'rov
+# Bu chegmani oshib ketadi -> kun oxirida qolgan postlar ZAXIRA
+# (statik) matnga tushadi -> foydalanuvchi "bugungi post ertaga
+# takror bo'ldi" degan shikoyatni beradi.
+#
+# Shuning uchun urishlar soni qoldirilgan kvotaga QARAB kamayadi.
+# Bepul reja (kuniga ~20):
+#   3 ta post + 1 ta viktorina = 4 asosiy chaqiruv, + 1-2 takror.
+#   -> chegadan xavfsiz.
+RESERVE_FOR_QUIZ = 2   # viktorina uchun doimiy zaxira
+
+
+async def ai_budget_left() -> int:
+    """Bugun yana qancha AI so'rovi qoldi (manfiy bo'lsa 0)."""
+    try:
+        used = await database.ai_used_today()
+    except Exception:
+        return AI_MAX_RETRIES
+    return max(0, AI_DAILY_LIMIT - used - RESERVE_FOR_QUIZ)
+
 GEN_CONFIG = {
     # Yuqori temperatura = har safar boshqacha matn.
     # Pastda (0.7-0.9) model bir xil javobni takrorlab beradi.
@@ -1177,8 +1201,17 @@ async def _call_with_retry(prompt: str, label: str) -> str:
         used = await database.ai_used_today()
         raise QuotaExhausted(f"kvota chegarasi ({used}/{AI_DAILY_LIMIT})")
 
+    # Urishlar soni qolgan kvotaga qarab CHEKLANGAN.
+    # Aks holda kunlik 20 so'rovlik bepul chegarasi 3 postga
+    # yetmay tugab qoladi va qolganlari statik matnga tushadi.
+    budget = await ai_budget_left()
+    attempts = max(1, min(AI_MAX_RETRIES, budget))
+    if attempts < AI_MAX_RETRIES:
+        print(f"   💰 Qoldiq kvota: {budget} — urishlar {attempts} ta "
+              f"qisqartirildi ({label})")
+
     last_error = ""
-    for attempt in range(1, AI_MAX_RETRIES + 1):
+    for attempt in range(1, attempts + 1):
         try:
             # MUHIM: generate_content() bloklovchi — thread'da ishga tushiramiz
             text = await asyncio.to_thread(_sync_generate, prompt)
@@ -1233,7 +1266,7 @@ async def _call_with_retry(prompt: str, label: str) -> str:
 
 
 # ===== ASOSIY FUNKSIYALAR =====
-async def generate_post(topic: str = None, post_type: str = "morning",
+async def generate_post(topic: str = None, *, post_type: str = "morning",
                         used_topics: set = None, with_image: bool = True) -> dict:
     """
     AI orqali post yozadi va (imkon bo'lsa) rasm yaratadi.
@@ -1241,10 +1274,22 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     Qaytaradi:
         {"content": str, "image": bytes|None, "topic": str, "source": str}
 
+    DIQQAT: `post_type` at kalit so'z bilan berilishi SHART
+    (masalan `generate_post(post_type="noon")`). Aks holda birinchi
+    parametr `topic` ga tushib ketadi va mavzu ro'yxatidan umuman
+    tanlanmaydi — barcha postlar "morning"/"noon" degan soxta
+    mavzuga yoziladi (bu xato ilgari sodir bo'lgan).
+
     Hech qachon istisno ko'tarmaydi — AI ishlamasa zaxira matn,
     rasm yaratilmasa None (post rasmsiz chiqadi).
     """
     category = ""
+    # Himoya: eski usulda `generate_post("noon")` — topic o'rniga post_type
+    # tushib ketgan bo'lishi mumkin. Aks holda mavzu "noon" bo'lib qoladi
+    # va mavzu ro'yxatidan umuman biror narsa tanlanmaydi.
+    if topic in ("morning", "noon", "evening"):
+        post_type, topic = topic, None
+
     if not topic:
         topic, category = _pick_topic(post_type, used_topics)
 
@@ -1285,7 +1330,19 @@ async def generate_post(topic: str = None, post_type: str = "morning",
     # AI bir marta chaqirilmaydi — bir necha marta uriladi va har
     # safar natija bazadagi eski postlar bilan solishtiriladi.
     # O'xshash chiqsa, yangi mavzu + boshqa uslub bilan qayta uriladi.
-    for attempt in range(1, MAX_DUPLICATE_RETRIES + 1):
+    #
+    # KVOTA: takror urishlar soni qolgan kvotaga bog'lanadi.
+    # Bepul reja kuniga ~20 so'rov beradi; 3x3=27 ta so'rov uni
+    # tugdirib yuboradi va qolgan postlar statik matnga tushadi —
+    # bu foydalanuvchining "post takrorlanadi" shikoyatining
+    # asosiy sababi edi.
+    budget = await ai_budget_left()
+    max_attempts = max(1, min(MAX_DUPLICATE_RETRIES, budget))
+    if max_attempts < MAX_DUPLICATE_RETRIES:
+        print(f"   💰 Qoldiq kvota: {budget} — urishlar {max_attempts} ta "
+              f"qisqartirildi")
+
+    for attempt in range(1, max_attempts + 1):
         # har urishda tuzilma/ohang/burchak QAYTA tanlanadi
         fmt, fmt_desc = random.choice(POST_FORMATS)
         opening = random.choice(OPENINGS)
@@ -1581,6 +1638,11 @@ def _parse_quiz(text: str):
     }
 
 
+def _norm_q(q: str) -> str:
+    """Savol matnini taqqoslash uchun bir xil ko'rinishga keltiradi."""
+    return " ".join((q or "").lower().split())
+
+
 async def generate_quiz(used: set = None) -> Optional[dict]:
     """
     Viktorina savolini yaratadi.
@@ -1590,10 +1652,18 @@ async def generate_quiz(used: set = None) -> Optional[dict]:
     """
     # 1) AI dan urinish
     fmt = random.choice(QUIZ_TYPES)
-    # takrorlanmagan savol mavzusini tanlaymiz
+    # Takrorlanmagan savol mavzusini tanlaymiz.
+    #
+    # MUHIM: `used` — yaqinda BERILGAN savollarning MATNLARI (to'liq
+    # savol), mavzu nomlari emas. Shuning uchun mavzuni tekshirish
+    # uchun "mavzu nomi used ichidagi biror savol matnida bormi"
+    # deb qarash kerak — oddiy `mavzu not in used` HECH QACHON
+    # to'g'ri kelmaydi (mavzu qisqa, used to'liq savol).
     topics_used = used or set()
     all_topics = [t for t, _a, _c in POST_TOPICS]
-    pool = [t for t in all_topics if t not in topics_used] or all_topics
+    lowered = {q.lower() for q in topics_used}
+    pool = [t for t in all_topics
+            if not any(t.lower() in q for q in lowered)] or all_topics
     topic = random.choice(pool)
 
     prompt = f"""{CHANNEL_NAME} kanalining viktorina savolini tuz.
@@ -1624,8 +1694,9 @@ JAVOB: <A|B|C|D>"""
 
     # 2) Zaxira savollardan takrorlanmaganini tanlaymiz
     bank = FALLBACK_QUIZZES
-    if used:
-        fresh = [q for q in bank if q["q"] not in used]
+    used_norm = {_norm_q(q) for q in (used or ()) if q}
+    if used_norm:
+        fresh = [q for q in bank if _norm_q(q["q"]) not in used_norm]
         if fresh:
             bank = fresh
     return random.choice(bank)

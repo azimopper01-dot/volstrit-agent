@@ -541,18 +541,39 @@ async def record_ai_call(success: bool = True, note: str = ""):
 
 
 async def ai_used_today() -> int:
+    """
+    Bugun qancha AI so'rovi yuborilgan.
+
+    MUHIM: barcha so'rovlar hisoblanadi — muvaffaqiyatli ham,
+    xatoli ham. Sababi: Google'ning kvotasi so'rov YUBORILGANINI
+    hisoblaydi, natijani emas. Faqat muvaffaqiyatlilarni hisoblash
+    botning o'z chegarasidan o'tib ketishiga olib kelardi
+    (xatolar sanovga tushmasdi) — va kun oxirida postlar statik
+    matnga tushib qolardi.
+    """
     row = await _query_one(
-        "SELECT COUNT(*) AS c FROM ai_usage WHERE success = 1 AND DATE(ts) = ?",
+        "SELECT COUNT(*) AS c FROM ai_usage WHERE DATE(ts) = ?",
+        (today_str(),)
+    )
+    return row["c"] if row else 0
+
+
+async def ai_success_today() -> int:
+    """Bugun muvaffaqiyatli bo'lgan so'rovlar (faqat statistika uchun)."""
+    row = await _query_one(
+        "SELECT COUNT(*) AS c FROM ai_usage WHERE success = 1 "
+        "AND DATE(ts) = ?",
         (today_str(),)
     )
     return row["c"] if row else 0
 
 
 async def ai_used_last_minute() -> int:
+    """Oxirgi daqiqadagi so'rovlar (xatolar ham hisobga olinadi)."""
     row = await _query_one(
         """
         SELECT COUNT(*) AS c FROM ai_usage
-        WHERE success = 1 AND ts >= datetime('now', '-1 minute')
+        WHERE ts >= datetime('now', '-1 minute')
         """
     )
     return row["c"] if row else 0
