@@ -18,6 +18,7 @@ QO'SHILGANLAR:
 import asyncio
 import html
 import logging
+import os
 from datetime import datetime, timedelta
 
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
@@ -34,6 +35,10 @@ import database
 from telegram_bot import (
     create_and_send_post, create_and_send_poll, safe_send, publish_quiz,
 )
+
+# Necha kun oldingi mavzularni eslab qolamiz.
+# 1 = faqat bugun. 7 = bir haftalik aylanish.
+RECENT_TOPIC_DAYS = int(os.getenv("RECENT_TOPIC_DAYS", "7"))
 
 logging.basicConfig(
     level=logging.INFO,
@@ -93,15 +98,45 @@ async def _run_job(job_id: str, label: str, coro_factory, catch_up: bool = False
 _USED_TOPICS: set = set()
 
 
-def _reset_topics():
+async def _load_used_topics():
+    """
+    Bazadan oxirgi kunlarda ishlatilgan mavzularni yuklaydi.
+
+    MUHIM: bu holda mavzu faqat KUN ICHIDA emas, bir necha KUN davomida
+    eslatiladi — shuning uchun ertaga bir xil post qaytmaydi.
+    """
     global _USED_TOPICS
-    _USED_TOPICS = set()
+    try:
+        recent = await database.get_used_topics(RECENT_TOPIC_DAYS)
+        _USED_TOPICS = set(recent)
+        print(f"🔄 Eslatma: {len(_USED_TOPICS)} ta mavzu eslab qolindi "
+              f"(oxirgi {RECENT_TOPIC_DAYS} kun)")
+    except Exception as e:
+        logger.warning("Mavzularni yuklab bo'lmadi: %s", e)
+        _USED_TOPICS = set()
+
+
+def _reset_topics():
+    """
+    Yangi kun boshlandi.
+
+    MUHIM: eslatma (_USED_TOPICS) butunlay tozalanMAYDI.
+    Aks holda ertaga bir xil mavzular qaytib kelar edi — bu
+    foydalanuvchining asosiy shikoyati edi ("bugungi post ertaga
+    takrorlandi").
+
+    Baza orqali eslatma (_load_used_topics) alohida yuklanadi va
+    oxirgi RECENT_TOPIC_DAYS kunni qamrab oladi.
+    """
+    # hech narsani to'lamaymiz — maqsad shu
+    return _USED_TOPICS
 
 
 def _mark_used(res):
     """Yaratilgan post mavzusini 'ishlatilgan' deb belgilaydi.
 
-    Bu holda kun ichidagi 3 ta post bir-biriga o'xshamaydi.
+    Bu holda kun ichidagi 3 ta post bir-biriga o'xshamaydi va
+    ko'p kun davomida ham mavzu takrorlanmaydi.
     """
     global _USED_TOPICS
     if not res:
@@ -277,6 +312,9 @@ async def catch_up_missed_jobs():
     Ishga tushishda bugunning vaqt o'tib ketgan ishlari bajarilganmi tekshiriladi.
     Konteyner 08:35 da qayta ishga tushsa, 08:30 dagi post darhol chiqadi.
     """
+    # eslatma avval yuklanadi — eski mavzular qaytarilmasin
+    await _load_used_topics()
+
     now = now_tz()
     caught = 0
 

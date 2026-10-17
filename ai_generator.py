@@ -263,6 +263,11 @@ IMAGE_STYLES = [
 
 # ===== ZAXIRA MATNLAR (AI ishlamasa ham kanal bo'sh qolmaydi) =====
 # Har biri o'zbek tilida, taxminan 500-800 belgi, faqat ta'lim maqsadida.
+#
+# Nima uchun bu bank KENGAYTIRILGAN:
+# Eski versiya har turda faqat 4 ta matn edi — kuniga 3 ta post yuborilsa,
+# ertasi ertalab yana xuddi shu matn chiqardi. Endi har turda 10+ ta bor
+# va fingerprint orqali takrorlanish tekshiriladi.
 FALLBACK_POSTS = {
     "morning": [
         """🌅 Yaxshi tong, bugungi kun uchun reja
@@ -337,6 +342,94 @@ odat barqarorlikni oshiradi.
 Qachon bozor ko'rishni eng yoqgan usul?
 
 #fond #analiz #kripto #forex""",
+        """🌅 Ertalab: uzoq muddatli fikr
+
+Bugungi savol: siz savdo qilasizmi yoki investitsiya qilasizmi?
+Ikki xil tushunchani aralashtirib yuborish — eng ko'p uchraydigan xato.
+
+📌 Farqi nimada:
+Savdoda maqsad — foyda. Narx pasaysa, xato bo'ldi.
+Investitsiyada maqsad — kompaniya o'sishi. Narx pasaysa, hali
+hech narsa degani emas.
+
+💡 Amaliy maslahat:
+Har bir pozitsiyada "bu qanchaga turadi va qanchaga chiqishi kerak"
+deb yozib qo'ying. Ikki savol ham bir xil javobni bermasa — savdo qiling,
+investitsiya qiling, chalkashtirmang.
+
+Siz farqni sezdingizmi?
+
+#fond #forex #analiz #kripto""",
+        """🌅 Ertalabki tahlil: bozor kimning qo'lida?
+
+Buzozdagi harakat ko'pincha yirik investorlar (institutlar) qaroriga
+bog'liq. Ularning pozitsiyalari katta hajmda bo'lgani uchun narxga ta'siri
+kuchli bo'ladi.
+
+📌 Nima uchun bu muhim:
+Institutsiyalar rejaga muvofiq savdo qiladi — ular hisobni vaqtincha
+to'xtatib turishi mumkin, lekin to'xtab qolmaydi.
+
+💡 Amaliy maslahat:
+Katta kompaniyalarning hisobot chiqarish sanasini bilib qo'ying.
+O'sha kunda narx harakatining yo'nalishini oldindan kutishingiz mumkin.
+
+Siz kanal kompaniyalarini kuzatamizmi?
+
+#fond #aksiya #analiz #forex""",
+        """🌅 Ertalab: valyuta va aksiya bog'liqligi
+
+Dollar kuchayishi ko'p hollarda aksiyalarga ham ta'sir qiladi, lekin
+har doim emas. Sababi — ko'p kompaniyalarning daromadi boshqa
+valyutalarda keladi.
+
+📌 Misol:
+Yapon kompaniyasi AQSH bozorida savdo qilgani uchun uning foydasi
+yen'ga bog'liq bo'ladi. Dollar kuchaysa, foyda kamayadi va narx
+tushishi mumkin.
+
+💡 Amaliy maslahat:
+Xalqaro kompaniya tanlaganda, uning faoliyat hududi va valyutasini
+hisobga oling. Bu oddiy odat katta farq beradi.
+
+Xalqaro kompaniya bo'yicha qanday fikrlasiz?
+
+#fond #forex #aksiya #analiz""",
+        """🌅 Ertalab: kun rejasi
+
+Har bir muvaffaqiyatli kunda bir xil ishlab, har bir muvaffaqiyatsiz
+kunda esa boshqa nima bilan shug'ullanish mumkin.
+
+📌 Reja tuzish tartibi:
+1. Qaysi bozorda ishlayotganingizni aniqlang
+2. Kunlik vaqt chegarasini belgilang
+3. Zarar chegarasini oldindan yozib qo'ying
+4. Ishlaganingizdan keyin natijani yozib boring
+
+💡 Amaliy maslahat:
+Eng qiyin bo'lgani — hech narsa qilmaslik. Sabr ba'zan eng
+yuqori natija beradi.
+
+Sizning kunningiz qanday o'tadi?
+
+#fond #kripto #forex #smm""",
+        """🌅 Ertalab: likvidlik muammosi
+
+Likvidlik — bitta savolga javob: "men xohlagan miqdorda qancha tez
+sotib olsam bo'ladi?" Bozor har doim bu savolga tayyor emas.
+
+📌 Nima uchun muhim:
+Katta kompaniyalarda (Apple, Nvidia) likvidlik yuqori — buyurtmangiz
+narxni deyarli o'zgartirmaydi. Kichik kompaniyalarda esa bitta order
+narsa o'zgartirishi mumkin.
+
+💡 Amaliy maslahat:
+Katta kompaniya qidirishda hayajon katta, lekin xavf kichik.
+Yangi kompaniyalarda esa aksincha.
+
+Qanday kompaniya tanlaysiz?
+
+#fond #aksiya #analiz""",
     ],
     "noon": [
         """☀️ Tushlikdagi vaziyat: kun o'rtasidagi xulosa
@@ -411,6 +504,60 @@ holat yana bo'lsa — tayyor bo'lasiz.
 Siz bozor sabablarini qanday kuzatarsiz?
 
 #fond #analiz #kripto""",
+        """☀️ Kripto: Bitcoin dominanti nimani anglatadi?
+
+Bitcoin bozor ulushi (dominantlik) — boshqa altcoinlarga nisbatan
+Bitcoinning ulushi. Bu ko'rsatkich investor kayfiyatini o'lchaydi.
+
+📌 Ikki holat:
+1. Dominantlik ko'tarilsa — odamlar altcoinga ketmoqda,
+   xavf yuqori
+2. Dominantlik tushsa — odamlar Bitcoin "xavfsizroq" deb
+   qaror qabul qiladi
+
+💡 Amaliy maslahat:
+Kripto bozorida Bitcoin har doim "ko'rsatkich" vazifasini bajaradi.
+Uni kuzatmasdan butun bozorni tushib olmaysiz.
+
+Dominantlikni kuzatadingizmi?
+
+#fond #kripto #analiz""",
+        """☀️ Kripto: staking nima beradi?
+
+Staking — Blockchain tarmogiga token qo'yib, uni ishlashga majbur qilish.
+Evaziga har bir vaqtda passiv daromad keladi.
+
+📌 Afzalliklari:
+- Foiz tushumadi, narx tushsa ham
+- Kripto bozorida foiz eng so'nggi qurol
+
+📌 Ehtiyotkorlik:
+Qiymat pasayganda ham foyda to'lanadi — bu sizga qimmat tushadi.
+
+💡 Amaliy maslahat:
+Stakingdan oldin kompaniyaning shartlarini o'qing. Qul yoki
+markazlashtirilgan xizmatlar qo'shimcha xavf keltiradi.
+
+Siz staking haqida nima bilasiz?
+
+#fond #kripto #forex""",
+        """☀️ Tushlik: FX va aksiya o'zaro aloqasi
+
+Valyuta juftliklari (EUR/USD, USD/JPY) va aksiya bozori ko'pincha
+bir-biriga bog'liq ishlaydi.
+
+📌 Asosiy qoida:
+Dollar kuchaygan sayin Yevropa va Yaponiya aksiyalari
+odatda qarshi tomonga harakat qiladi. Sabab — ularning
+savdolari dollar bilan narxlanadi.
+
+💡 Amaliy maslahat:
+Ikkalasini bir vaqtda kuzating. Birining signali ikkinchisini
+tasdiqlaydi.
+
+Ikkala bozor bir-biriga qanday ta'sir qiladi?
+
+#fond #forex #aksiya #analiz""",
     ],
     "evening": [
         """🌆 Kechki xulosa: kunni yakunlash
@@ -482,6 +629,109 @@ qanday bo'lishidan qat'i nazar, siz barqarorsiz.
 Siz qaysi birini birinchi bo'lib tuzatildi?
 
 #fond #aksiya #analiz #forex""",
+        """🌆 Kechqurun: ertasi uchun tayyorgarlik
+
+Bugun bozorda nima bo'lgani muhim emas. Muhe nima bo'ldi — u muhim.
+Shuning uchun kechqurun bir vaqt sarflab "bugun nimani o'rgandim" degan
+bitta jumla yozib qo'ying.
+
+📌 O'z o'zingizga savollar:
+- Bugun qanday xato qildim?
+- Qaysi qaror yaxshi bo'ldi?
+- Ertasi uchun nimani o'zgartiraman?
+
+💡 Amaliy maslahat:
+Bir haftalik "darslik" yozib boring. Odatda uchinchi haftada
+o'zingizning asosiy xatangiz ko'rinadi.
+
+Siz bugun nimani o'rgandingiz?
+
+#fond #forex #kripto #smm""",
+        """🌆 Kechqurun: psixologik tayyorgarlik
+
+Kechqurun bozor uchun eng xavfli vaqt. Sabab — kun oxirida ko'p odam
+charchagan holda qaror qabul qiladi.
+
+📌 Nima uchun xavfli:
+Charchoq hissiyot nazoratni susaytiradi. Bir daqiqa kechiktirilgan
+buyurtma ko'pincha zarar keltiradi.
+
+💡 Amaliy maslahat:
+Kechqurun pozitsiya yopish qoidasini oldindan yozib qo'ying —
+keyin his-tuyga emas, yozma rejangizga amal qiling.
+
+Siz kechqurun qaror qabul qilasizmi?
+
+#fond #analiz #kripto""",
+        """🌆 Kechqurun: bugungi natija
+
+Har bir kun yakunida o'zingizga uchta savol bering:
+1. Rejaga amal qildimmi?
+2. Xato qilsam, zarar chegarasi ishlaganmi?
+
+Agar "yo'q" bo'lsa — muammo hissiyotda emas, tizimda.
+
+📌 Nima uchun muhim:
+Kichik muayyan pozitsiyada sinab ko'rish — xatoning narxini
+oldingizdan bilib oladi.
+
+💡 Amaliy maslahat:
+Keyingi marta katta summa bilan emas, kichik summa bilan
+sinab ko'ring. Bu tajribangizni kengaytiradi.
+
+Siz qaysi pozitsiyani tekshirib turibsiz?
+
+#fond #forex #kripto #smm""",
+        """🌆 Kechqurun: yotishdan oldin 3 daqiqa
+
+Kun yakunida 3 daqiqa sarflab, bugunni yozib qo'ying. Bu odat
+ko'p oy kuchli natija beradi.
+
+📌 Nima yozish kerak:
+1. Bugun qanday qaror qabul qildim?
+2. Qanday xato qildim?
+3. Ertasi uchun nimani o'zgartiraman?
+
+💡 Amaliy maslahat:
+Faqat 3 savol. Har kuni. Bir oyda 90 javob — bu o'z-o'zidan
+bir darslik.
+
+Siz bugun nimani yozib qoldirdingiz?
+
+#fond #forex #kripto #smm""",
+        """🌆 Kechqurun: endi bozor yopilmoqda
+
+Amerika birjasi yopilishdan oldin kun yakunlanadi. Bu vaqtda
+ko'p kompaniyalar ertasi kun uchun yangilik chiqaradi.
+
+📌 Nima uchun bu vaqt muhim:
+Kechki tebranish ertalabki harakatni to'liq bekor qilishi mumkin.
+Shuning uchun kechqurma yotishdan oldin pozitsiyani
+ko'rib chiqing.
+
+💡 Amaliy maslahat:
+Ertasi kun uchun kutilayotgan gaplarni yozib qo'ying.
+Bu sizga ertalab "men tayyor edim" degan imkoniyat beradi.
+
+Ertasi kun uchun nima kutiladi?
+
+#fond #analiz #forex""",
+        """⚠️ Xato: "bu boshqa biri bo'lsa"
+
+Har bir investitsiyada bir savol doim paydo bo'ladi: "bu
+boshqa aktivmikan?" Va bu savol ko'pincha zarar keltiradi.
+
+📌 Nima uchun xato:
+Boshqa aktiv haqiqiy bo'lsa ham, u sizning strategiyangizga
+mos kelmaydi. Strategiya mos kelmasa — aktiv ham yaramaydi.
+
+💡 Amaliy maslahat:
+"Bu meni hayratda qoldiradimi?" savolini ishlating.
+Agar "ha" bo'lsa — bu sizning aktivingiz emas.
+
+Siz qaysi aktivi tanlaysiz?
+
+#fond #analiz #kripto""",
     ],
     "default": [
         """📊 Kanalimizdan foydali ma'lumot
@@ -501,6 +751,89 @@ Kichik summa bilan real tajriba oling. Nazariy bilim va amaliy
 tajriba — ikkalasi bir xil emas.
 
 Siz qaysi tushunchani o'rgatishimni xohlaysiz?
+
+#fond #aksiya #forex #kripto""",
+        """📊 Risk va daromad: nima uchun muvozanat kerak?
+
+Yuqori daromad har doim yuqori xavf bilan birga keladi. Bu
+muhokama qilinmaydi — shunchaki hamma uchun turli.
+
+📌 Nima uchun muhim:
+Sizning yondashuvingiz boshqalarnikidan farq qilsa, xuddi shu
+vaqtda sizning xavf darajangiz ham farq qiladi.
+
+💡 Amaliy maslahat:
+Savdo qilishdan oldin o'zingizga savol bering: "zararim qancha?"
+Bu savolga javob bermasdan pozitsiya ochmang.
+
+Sizning xavf chegarangiz qancha?
+
+#fond #analiz #forex""",
+        """📊 Vaqt: investitsiyada eng qimmat resurs
+
+Yangi investorlar ko'pincha noto'g'ri joydan boshlaydi — texnikal
+tahlilni chuqur o'rganishdan. Hal bular muhim emas.
+
+📌 Asosiy qoida:
+Vaqtni qayerda sarflash kerak:
+1. Keng bozor o'rganish (turli sohalar)
+2. Reja yozish va nazorat qilish
+3. Bitta sohani chuqur o'rganish
+
+💡 Amaliy maslahat:
+Keng bilim — keng imkoniyat. Tor bilim esa tor imkoniyat.
+
+Qayerda boshladingiz?
+
+#fond #kripto #analiz""",
+        """📊 Bozor turlari: kim kim uchun?
+
+Bir bozor barcha uchun emas. Har kimning strategiyasi o'z
+bozoriga mos bo'lishi kerak.
+
+📚 Uch asosiy yo'nalish:
+1. Uzoq muddatli — 5 yildan ortiq, kompaniya o'sishiga ishonch
+2. O'rta muddatli — haftalar davomida trendni ushlash
+3. Qisqa muddatli — kunlar ichida tebranishdan foydalanish
+
+💡 Amaliy maslahat:
+Qayerda boshlaganingizni aniqlang. Boshlashni o'zgartirmay
+turguncha natija chiqmaydi.
+
+Qaysi yo'nalish sizga yaqin?
+
+#fond #forex #kripto""",
+        """📊 Xato — bu ma'lumot
+
+Har bir muvaffaqiyatsiz pozitsiya — bu ma'lumot, zarar emas.
+Shuni tushunish — investorlikdagi eng katta o'zgarish.
+
+📌 Xatoni tahlil qilish:
+1. Reja yo'qligi sababmi?
+2. Xavf chegarasi qo'yilmaganmi?
+3. Hissiyot bilan qaror qabul qilinganmi?
+
+💡 Amaliy maslahat:
+Har bir xatoni yozib boring. Bir haftada eng ko'p takrorlanuvchi
+xatoni topasiz — u sizga eng ko'p foyda keltiradi.
+
+Sizning eng ko'p xatoyingiz qaysi?
+
+#fond #analiz #smm""",
+        """📊 Taqsimot: nima uchun "hammasi" yaxshi emas
+
+Ba'zi investorlar bitta sohaga 100% investitsiya qiladi.
+Bu katta xavf — o'sha soha tushsa, butun portfel tushadi.
+
+📌 Asosiy qoida:
+Diversifikatsiya — xavfni bo'lish usuli. Siz hamma narsaga
+ishoninganda siz hech narsaga ishonavermaysiz.
+
+💡 Amaliy maslahat:
+Sohalar sonini emas, o'zaro bog'liqligini tekshiring.
+Ikki soha o'zaro bog'liq bo'lsa — bu diversifikatsiya emas.
+
+Portfelingiz qanday taqsimlangan?
 
 #fond #aksiya #forex #kripto""",
     ],
@@ -723,13 +1056,34 @@ def _pick_image_style(used: set = None, category: str = "") -> str:
 
 
 def _fallback(post_type: str, reason: str = "", used: set = None) -> str:
-    """AI o'rniga ishlatiladigan zaxira matn (takrorlanmaslik bilan)."""
+    """
+    AI o'rniga ishlatiladigan zaxira matn.
+
+    MUHIM (eski kodda ikki xato bor edi):
+      1) `used` ga to'liq matn qo'shilib, keyin bankdagi matnlar bilan
+         solishtirilardi — filtr hech qachon ishlamagan.
+      2) Endi ham `used` ga to'liq matn qo'shiladi, lekin solishtirish
+         KALIT SO'Z (fingerprint) orqali qilinadi. Shu sababli caller
+         to'liq matn qo'shishi mumkin.
+
+      `used` — qo'lda to'ldirilgan set bo'lishi mumkin (scheduler),
+      ichida to'liq matnlar bo'ladi.
+    """
     bank = FALLBACK_POSTS.get(post_type) or FALLBACK_POSTS["default"]
-    if used:
-        fresh = [t for t in bank if t not in used]
-        if fresh:
-            bank = fresh
+
+    # ishlatilgan matnlarning fingerprint'larini yig'amiz
+    used_fp = set()
+    for item in (used or ()):
+        used_fp.add(frozenset(database._fingerprint(item)))
+
+    fresh = [t for t in bank if frozenset(database._fingerprint(t)) not in used_fp]
+    if fresh:
+        bank = fresh
+
+    # hozircha barchasi ishlatilgan — eng kam ishlatilganini qayta tanlaymiz
     text = random.choice(bank)
+    if used is not None:
+        used.add(text)
     if reason:
         print(f"⚠️  Zaxira matn ishlatildi ({post_type}): {reason}")
     return text

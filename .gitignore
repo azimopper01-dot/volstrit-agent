@@ -14,6 +14,7 @@ env/
 ENV/
 .venv
 .venv_test/
+.v/
 
 # Railway (CLI mahalliy konfiguratsiyasi; railway.json esa JOYIDA qoladi)
 railway.toml

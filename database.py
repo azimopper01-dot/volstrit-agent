@@ -391,11 +391,18 @@ async def is_duplicate(content: str, threshold: float = 0.55,
 
 
 async def get_used_topics(days: int = 30) -> set:
-    """Oxirgi N kun ichida ishlatilgan mavzular (barchasi, eskirganlar ham)."""
+    """Oxirgi N kun ichida ishlatilgan mavzular.
+
+    MUHIM: created_at Asia/Tashkent da saqlanadi, lekin SQL'dagi
+    datetime('now') — UTC. Ularni to'g'ridan-to'g'ri solishtirish
+    bir necha soatlik xato berardi. Shuning uchun chegarani
+    Python'da (o'sha vaqt mintaqasida) hisoblaymiz.
+    """
+    from datetime import timedelta
+    cutoff = (now_tz() - timedelta(days=days)).isoformat(timespec="seconds")
     rows = await _query_all(
         "SELECT topic FROM posts WHERE topic IS NOT NULL AND topic != '' "
-        "AND created_at > datetime('now', ?) "
-        "ORDER BY created_at DESC", (f"-{days} days",)
+        "AND created_at >= ? ORDER BY created_at DESC", (cutoff,)
     )
     return {(r["topic"] or "").split(" — ")[0].split(" - ")[0].strip()
             for r in rows if r["topic"]}

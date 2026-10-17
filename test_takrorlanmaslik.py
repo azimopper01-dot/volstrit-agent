@@ -1,0 +1,98 @@
+"""
+test_takrorlanmaslik.py — Ertaga bir xil post qaytmasligini tekshiradi.
+
+Ssenariy:
+  1-kun: 3 ta post yoziladi, bazaga saqlanadi
+  2-kun: baza eslatmasi yuklanadi, o'sha mavzular QAYTARILMAYDI
+"""
+import asyncio
+import os
+import sys
+
+os.environ.setdefault("BOT_TOKEN", "123456:TEST")
+os.environ.setdefault("ADMIN_ID", "1")
+os.environ.setdefault("GEMINI_API_KEY", "x")
+os.environ.setdefault("DB_PATH", "test_repeat.db")
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+import database as d
+import ai_generator as a
+import scheduler as sch
+
+
+async def main():
+    if os.path.exists("test_repeat.db"):
+        os.remove("test_repeat.db")
+    await d.init_db()
+
+    print("=" * 64)
+    print("🔁 ERTAGA TAKRORLANMASLIK SINOVI")
+    print("=" * 64)
+
+    # ---------- 1-KUN ----------
+    print("\n📅 1-kun: 3 ta post yoziladi")
+    day1 = []
+    for pt in ("morning", "noon", "evening"):
+        topic, cat = a._pick_topic(pt, sch._USED_TOPICS)
+        name = topic.split(" — ")[0].split(" - ")[0].strip()
+        sch._USED_TOPICS.add(name)
+        await d.save_post(topic * 2, topic, cat)
+        day1.append(name)
+        print(f"   {pt:8} [{cat:11}] {name}")
+
+    # ---------- ESLATMA ----------
+    used = await d.get_used_topics(7)
+    print(f"\n🧠 Bazadagi eslatma: {len(used)} ta mavzu "
+          f"(oxirgi 7 kun)")
+
+    # ---------- 2-KUN ----------
+    print("\n📅 2-kun: eslatma yuklanadi, yangi mavzular tanlanadi")
+    sch._USED_TOPICS = set(used)
+    day2 = []
+    for pt in ("morning", "noon", "evening"):
+        topic, cat = a._pick_topic(pt, sch._USED_TOPICS)
+        name = topic.split(" — ")[0].split(" - ")[0].strip()
+        sch._USED_TOPICS.add(name)
+        day2.append(name)
+        print(f"   {pt:8} [{cat:11}] {name}")
+
+    repeat = set(day1) & set(day2)
+    print(f"\n{'✅' if not repeat else '❌'} Takrorlangan mavzu: "
+          f"{len(repeat)}")
+    if repeat:
+        for r in repeat:
+            print(f"    ⚠️ {r}")
+
+    # ---------- ZAXIRA MATNLAR ----------
+    print("\n📦 Zaxira matnlar:")
+    tot = sum(len(v) for v in a.FALLBACK_POSTS.values())
+    print(f"   Jami: {tot} ta ({tot // 3} kunga yetadi)")
+    for k, v in a.FALLBACK_POSTS.items():
+        print(f"     {k:9}: {len(v)}")
+
+    used_fb = set()
+    heads = []
+    for pt in ("morning", "noon", "evening"):
+        for _ in range(3):
+            t = a._fallback(pt, "", used_fb)
+            used_fb.add(t)
+            heads.append(t.split("\n")[0][:34])
+    print(f"   9 ta ketma-ket so'rash -> noyob: {len(set(heads))}/9")
+
+    # 5 kunlik simulatsiya
+    u5 = set()
+    h5 = []
+    for _ in range(5):
+        for pt in ("morning", "noon", "evening"):
+            t = a._fallback(pt, "", u5)
+            u5.add(t)
+            h5.append(t.split("\n")[0])
+    print(f"   5 kun (15 post) -> noyob: {len(set(h5))}/15")
+
+    os.remove("test_repeat.db")
+    return 0 if not repeat and len(set(heads)) == 9 else 1
+
+
+if __name__ == "__main__":
+    sys.exit(asyncio.run(main()) or 0)
