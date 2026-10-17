@@ -26,12 +26,14 @@ from apscheduler.triggers.interval import IntervalTrigger
 
 from config import (
     POST_TIME_MORNING, POST_TIME_NOON, POST_TIME_EVENING,
-    POLL_DAY, POLL_TIME, TIMEZONE, TZ, ADMIN_ID,
+    POLL_DAY, POLL_TIME, TIMEZONE, TZ, ADMIN_ID, CHANNEL_ID,
     AUTO_PUBLISH, AUTO_PUBLISH_LABEL, AI_DAILY_LIMIT, NOTIFY_ADMIN, now_tz,
-    APPROVAL_TIMEOUT_HOURS, APPROVAL_REMINDERS,
+    APPROVAL_TIMEOUT_HOURS, APPROVAL_REMINDERS, QUIZ_TIME, QUIZ_ENABLED,
 )
 import database
-from telegram_bot import create_and_send_post, create_and_send_poll, safe_send
+from telegram_bot import (
+    create_and_send_post, create_and_send_poll, safe_send, publish_quiz,
+)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -145,6 +147,19 @@ async def job_weekly_poll(catch_up: bool = False):
     return await _run_job(
         "weekly_poll", f"📊 Haftalik so'rovnoma ({POLL_DAY} {POLL_TIME})",
         create_and_send_poll, catch_up
+    )
+
+
+# ===== VIKTORINA =====
+async def job_quiz(catch_up: bool = False):
+    """Kunlik viktorina — kanalga to'g'ridan-to'g'ri (tasdiqlashsiz).
+
+    Viktorina savollari qiziqarli bo'lgani uchun ularni admin
+    tasdiqlamasdan kanalga yuboramiz — bu kanalni jonlantiradi.
+    """
+    return await _run_job(
+        "quiz", f"🧠 Viktorina ({QUIZ_TIME})",
+        lambda: publish_quiz(CHANNEL_ID), catch_up
     )
 
 
@@ -347,6 +362,21 @@ def setup_scheduler():
         max_instances=1,
     )
     JOBS_META["weekly_poll"] = (POLL_TIME, "📊 Haftalik so'rovnoma")
+
+    # Kunlik viktorina — kanalga to'g'ridan-to'g'ri, tasdiqlashsiz
+    if QUIZ_ENABLED:
+        h, m = parse_time(QUIZ_TIME)
+        scheduler.add_job(
+            job_quiz,
+            CronTrigger(hour=h, minute=m, timezone=TZ),
+            id="quiz",
+            replace_existing=True,
+            name=f"🧠 Viktorina ({QUIZ_TIME} {TIMEZONE})",
+            misfire_grace_time=3600,
+            coalesce=True,
+            max_instances=1,
+        )
+        JOBS_META["quiz"] = (QUIZ_TIME, "🧠 Viktorina")
 
     # Real vaqt vazifalari uchun "tik" — har daqiqada tekshiradi
     scheduler.add_job(

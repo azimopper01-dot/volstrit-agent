@@ -690,6 +690,56 @@ async def main():
     check("qayta yozilgan post matni yangilandi",
           row["content"] == "yangi matn boshqacha")
 
+    # ---------- 18. VIKTORINA ----------
+    print("\n1️⃣8️⃣ Viktorina (quiz)")
+    check("zaxira savollar bor (>=8)", len(ai.FALLBACK_QUIZZES) >= 8,
+          f"{len(ai.FALLBACK_QUIZZES)} ta")
+    check("qiyoslash usullari bor (>=6)", len(ai.QUIZ_TYPES) >= 6,
+          f"{len(ai.QUIZ_TYPES)} ta")
+
+    raw = ("SAVOL: Likvidlik nima?\n"
+           "VARIANT: Narx tezligi\n"
+           "VARIANT: Almashuv hajmi\n"
+           "VARIANT: Kompaniya foydasi\n"
+           "VARIANT: Egalik ulushi\n"
+           "JAVOB: B")
+    pq = ai._parse_quiz(raw)
+    check("AI javobi to'g'ri parse qilindi",
+          pq["a"] == 1 and len(pq["o"]) == 4, f"javob={pq['a']}")
+
+    try:
+        ai._parse_quiz("SAVOL: <savol>\nVARIANT: <1>")
+        check("shablon rad etildi", False)
+    except Exception:
+        check("shablon rad etildi", True)
+
+    uq = set()
+    for _ in range(5):
+        z = await ai.generate_quiz(used=uq)
+        uq.add(z["q"])
+    check("5 ta viktorina noyob", len(uq) == 5, f"{len(uq)}/5")
+    zq = await ai.generate_quiz()
+    check("to'g'ri javob indeksi to'g'ri",
+          0 <= zq["a"] < len(zq["o"]), f"a={zq['a']}, {len(zq['o'])} variant")
+    check("4 ta variant bor", len(zq["o"]) == 4, str(len(zq["o"])))
+
+    zid = await database.save_quiz(pq["q"], pq["o"], pq["a"], "izoh")
+    ok1 = await database.record_vote(zid, 111, pq["a"])
+    ok2 = await database.record_vote(zid, 222, 0)
+    ok3 = await database.record_vote(zid, 111, pq["a"])
+    check("to'g'ri javob qabul qilindi", ok1)
+    check("xato javob ham qabul qilindi", ok2)
+    check("takror javob RAD etildi", not ok3)
+    stq = await database.get_quiz_stats(zid)
+    check("statistika to'g'ri",
+          stq["votes"] == 2 and stq["correct_count"] == 1,
+          f"{stq['correct_count']}/{stq['votes']}")
+    uq2 = await database.get_user_quiz_stats(111)
+    check("foydalanuvchi natijasi",
+          uq2["total"] == 1 and uq2["correct"] == 1)
+    check("yaqinda berilgan savollar olinadi",
+          isinstance(await database.get_recent_quiz_questions(), set))
+
     # ---------- NATIJA ----------
     print("\n" + "=" * 68)
     passed = sum(1 for c, _, _ in results if c)

@@ -832,8 +832,9 @@ async def _call_with_retry(prompt: str, label: str) -> str:
                 raise TransientAIError("AI bo'sh javob qaytardi")
 
             # AI promptni o'zini qaytargan bo'lsa — qayta uramiz
-            # (poll uchun matn tabiiy qisqa, shuning uchun chegarasi boshqa)
-            min_len = 80 if label == "poll" else 250
+            # poll va quiz uchun matn tabiiy qisqa va strukturali,
+            # shuning uchun chegarasi boshqa
+            min_len = 80 if label in ("poll", "quiz") else 250
             if _looks_like_garbage(text, min_len=min_len):
                 await database.record_ai_call(False, "bad_output")
                 raise TransientAIError(
@@ -1094,6 +1095,186 @@ VARIANT: <to'rtinchi variant>"""
     except Exception as e:
         print(f"❌ So'rovnoma yaratilmadi: {e}")
         return None
+
+
+# ===== VIKTORINA (QUIZ) =====
+# Savol + 4 ta variant + to'g'ri javob + qisqa izoh.
+# Telegram'da inline tugmalar orqali odamlar javob beradi.
+
+# Savol qiyoslash usullari — AI har safar boshqacha qiyoslash usulidan foydalansin
+QUIZ_TYPES = [
+    "aniq raqamni aniqlash",
+    "tushunchani o'xshatish",
+    "qaysi biri to'g'ri",
+    "sabab-natija bog'lanishi",
+    "terminni izohlash",
+    "real misolni tahlil qilish",
+    "keltirilgan vaziyatni hal qilish",
+]
+
+# Zaxira viktorina savollari (AI kvota tugsa ham ishlaydi)
+FALLBACK_QUIZZES = [
+    {
+        "q": "Likvidlik past bo'lgan aktivi uchun qaysi xato eng tez uchraydi?",
+        "o": ["Katta order narxni tez suradi",
+             "Kompaniya foizini oshiradi",
+             "Eski kompaniya yopiladi",
+             "Aksiya bozoridan chiqadi"],
+        "a": 0,
+        "e": "Likvidlik past bo'lsa, siz bergan order narxni o'ziga tortadi.",
+    },
+    {
+        "q": "Diversifikatsiya nimani anglatadi?",
+        "o": ["Bitta aksiyaga ko'p pul qo'yish",
+             "Turli sohalarga mablag' bo'lish",
+             "Qisqa muddatda savdo qilish",
+             "Foiz stavkasini o'zgartirish"],
+        "a": 1,
+        "e": "Diversifikatsiya — bitta sohaga bog'liq bo'lmaslik.",
+    },
+    {
+        "q": "Stop-loss buyurtmasi nima uchun kerak?",
+        "o": ["Foydani kuchaytirish uchun",
+             "Zararni cheklash uchun",
+             "Kurs aniqlash uchun",
+             "Kompaniya tanlash uchun"],
+        "a": 1,
+        "e": "Stop-loss zarar bo'yicha chegara qo'yadi.",
+    },
+    {
+        "q": "Kripto bozori qaysi xususiyati bilan farqlanadi?",
+        "o": ["Yopiq ofis ishlari bilan",
+             "24/7 ishlaydi va tebranishi kuchli",
+             "Faqat bankalar orqali",
+             "Faqat bir mamlulot mavjud"],
+        "a": 1,
+        "e": "Kripto 24 soat ochiq va tebranishi juda kuchli.",
+    },
+    {
+        "q": "EUR/USD juftligida dollar kuchayishi nimani anglatadi?",
+        "o": ["EUR/USD pasayadi",
+             "EUR/USD ko'tariladi",
+             "Kurs o'zgarmaydi",
+             "Faqat Bitcoin o'zgaradi"],
+        "a": 0,
+        "e": "Dollar kuchaysa, EUR/USD juftligi pasayadi.",
+    },
+    {
+        "q": "Emotsiyaga berilib savdo qilish natijasi qanday bo'ladi?",
+        "o": ["Doim foyda keltiradi",
+             "Tez qaror berish yordam beradi",
+             "Xato qaror va katta zarar ehtimoli yuqori",
+             "Kompaniya haqida xulosa beradi"],
+        "a": 2,
+        "e": "His-tuy bu sarfda xato qaror va zarar keltiradi.",
+    },
+    {
+        "q": "Bugungi bozorda nima kuzatilmoqda?",
+        "o": ["Faqat Bitcoin",
+             "Indekslar, FX, kripto va kompaniya hisobotlari",
+             "Faqat oltin",
+             "Faqat aksiyalar"],
+        "a": 1,
+        "e": "Zamonaviy bozor bir necha yo'nalishni qamrab oladi.",
+    },
+    {
+        "q": "Rejangiz yozilmagan bo'lsa, birinchi xato nima bo'ladi?",
+        "o": ["Noto'g'ri platforma tanlash",
+             "Rejasiz qaror qabul qilish",
+             "Noto'g'ri internet tezligi",
+             "Bazadagi ma'lumot yetishmasligi"],
+        "a": 1,
+        "e": "Rejasiz savdo — eng ko'p zarar keltiradigan xato.",
+    },
+]
+
+
+def _parse_quiz(text: str):
+    """AI matnini quiz dict'iga aylantiradi."""
+    question = ""
+    options = []
+    answer = -1
+
+    for line in (text or "").split("\n"):
+        line = line.strip()
+        for ch in ("&", "<", ">"):
+            line = line.replace(ch, "-")
+        if line.startswith("SAVOL:"):
+            question = line.replace("SAVOL:", "").strip()
+        elif line.startswith("VARIANT:"):
+            options.append(line.replace("VARIANT:", "").strip())
+        elif line.startswith("JAVOB:"):
+            raw = line.replace("JAVOB:", "").strip().upper()
+            # "A" / "B" / "C" / "D" yoki "1" / "2" / "3" / "4"
+            letters = {"A": 0, "B": 1, "C": 2, "D": 3}
+            if raw[:1] in letters:
+                answer = letters[raw[:1]]
+            elif raw[:1].isdigit():
+                n = int(raw[0]) - 1
+                if 0 <= n < 10:
+                    answer = n
+
+    if not question or len(options) < 2 or answer < 0 or answer >= len(options):
+        raise TransientAIError("AI quiz formatini to'g'ri bermadi")
+    if "<" in question or question.startswith("SAVOL"):
+        raise TransientAIError("AI shablon qaytardi")
+
+    return {
+        "q": question,
+        "o": options[:4],
+        "a": answer,
+        "e": "",
+    }
+
+
+async def generate_quiz(used: set = None) -> Optional[dict]:
+    """
+    Viktorina savolini yaratadi.
+
+    Qaytaradi: {"q": savol, "o": [variantlar], "a": to'g'ri index, "e": izoh}
+    AI ishlamasa — zaxira savollardan biri (takrorlanmas).
+    """
+    # 1) AI dan urinish
+    fmt = random.choice(QUIZ_TYPES)
+    # takrorlanmagan savol mavzusini tanlaymiz
+    topics_used = used or set()
+    all_topics = [t for t, _a, _c in POST_TOPICS]
+    pool = [t for t in all_topics if t not in topics_used] or all_topics
+    topic = random.choice(pool)
+
+    prompt = f"""{CHANNEL_NAME} kanalining viktorina savolini tuz.
+
+Mavzu: {topic}
+Savol turi: {fmt}
+
+QOIDALAR:
+- Savol qisqa va aniq bo'lsin (80 belgidan oshmasin)
+- 4 ta javob variant bo'lsin, har biri 40 belgidan oshmasin
+- Bittagina to'g'ri javob bo'lsin, qolganlari mantiqan noto'g'ri
+- Savol qiziqarli va o'ylantirsin
+- Javob variantlari aralash bo'lsin (to'g'ri har doim 1-b bo'lmasin)
+
+Javobni faqat shu formatda yoz:
+SAVOL: <savol>
+VARIANT: <1>
+VARIANT: <2>
+VARIANT: <3>
+VARIANT: <4>
+JAVOB: <A|B|C|D>"""
+
+    try:
+        text = await _call_with_retry(prompt, "quiz")
+        return _parse_quiz(text)
+    except Exception as e:
+        print(f"⚠️  AI viktorina yaratolmadi: {type(e).__name__}: {e}")
+
+    # 2) Zaxira savollardan takrorlanmaganini tanlaymiz
+    bank = FALLBACK_QUIZZES
+    if used:
+        fresh = [q for q in bank if q["q"] not in used]
+        if fresh:
+            bank = fresh
+    return random.choice(bank)
 
 
 async def improve_post(original: str, feedback: str,

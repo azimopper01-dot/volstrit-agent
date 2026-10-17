@@ -14,6 +14,7 @@ import asyncio
 import html
 import logging
 from datetime import timedelta
+from typing import Optional
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.types import (
@@ -34,13 +35,14 @@ from config import (
     TELEGRAM_CONNECT_TIMEOUT, TELEGRAM_READ_TIMEOUT, TELEGRAM_SEND_RETRIES,
     TIMEZONE, now_tz, now_iso, POST_TIME_MORNING, POST_TIME_NOON,
     POST_TIME_EVENING, POLL_DAY, POLL_TIME, AI_DAILY_LIMIT,
+    QUIZ_TIME, QUIZ_ENABLED,
 )
 import database
 from aiogram.types import BufferedInputFile
 
 from ai_generator import (
     generate_post, generate_post_for_topic, generate_poll, improve_post,
-    _pick_topic,
+    _pick_topic, generate_quiz,
 )
 
 logging.basicConfig(
@@ -171,6 +173,58 @@ def _preview_text(post_id: int, content: str, post_type: str) -> str:
     return f"{header}\n{'━' * 16}\n{body}\n{'━' * 16}"
 
 
+# ===== VIKTORINA (QUIZ) =====
+QUIZ_STATS: dict = {}   # quiz_id -> {"votes": int, "correct": int}
+
+
+def quiz_keyboard(quiz_id: int, options: list) -> InlineKeyboardMarkup:
+    """Viktorina javob tugmalari (A/B/C/D)."""
+    rows = []
+    letters = "ABCD"
+    for i, opt in enumerate(options[:4]):
+        rows.append([
+            InlineKeyboardButton(
+                text=f"{letters[i]}. {(opt or '')[:40]}",
+                callback_data=f"quiz_{quiz_id}_{i}",
+            )
+        ])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+async def publish_quiz(chat_id: int | str) -> Optional[int]:
+    """Viktorina yaratadi va berilgan chatga yuboradi."""
+    used = await database.get_recent_quiz_questions(10)
+    quiz = await generate_quiz(used=used)
+    if not quiz:
+        return None
+
+    quiz_id = await database.save_quiz(
+        question=quiz["q"], options=quiz["o"],
+        answer=quiz["a"], explanation=quiz.get("e", ""),
+    )
+    QUIZ_STATS[quiz_id] = {"votes": 0, "correct": 0}
+
+    letters = "ABCD"
+    lines = "\n".join(
+        f"{letters[i]}. {html.escape(o or '')}" for i, o in enumerate(quiz["o"][:4])
+    )
+    text = (
+        f"🧠 <b>VIKTORINA</b>\n\n"
+        f"❓ {html.escape(quiz['q'])}\n\n"
+        f"{lines}\n\n"
+        f"👇 To'g'ri javobni tanlang:"
+    )
+
+    sent = await safe_send(
+        chat_id, text,
+        parse_mode=ParseMode.HTML,
+        reply_markup=quiz_keyboard(quiz_id, quiz["o"]),
+    )
+    await database.set_quiz_sent(quiz_id, sent.message_id)
+    print(f"🧠 Viktorina #{quiz_id} yuborildi (msg={sent.message_id})")
+    return quiz_id
+
+
 # ===== KOMANDALAR =====
 @router.message(Command("start"))
 async def cmd_start(message: Message):
@@ -183,6 +237,8 @@ async def cmd_start(message: Message):
         f"🔗 {CHANNEL_LINK}\n\n"
         f"<b>Buyruqlar:</b>\n"
         f"/post — hozir post yozish\n"
+        f"/quiz — viktorina yuborish\n"
+        f"/score — natijangiz\n"
         f"/poll — so'rovnoma yaratish\n"
         f"/schedule HH:MM mavzu — real vaqtda vazifa berish\n"
         f"/stats — statistika\n"
@@ -204,7 +260,12 @@ async def cmd_help(message: Message):
         f"2️⃣ Xabar tugmalari orqali o'chirilishi yoki qayta yozilishi mumkin\n\n"
         f"⏰ <b>Avtomatik postlar ({TIMEZONE}):</b> "
         f"{POST_TIME_MORNING}, {POST_TIME_NOON}, {POST_TIME_EVENING}\n"
+        f"🧠 <b>Viktorina:</b> har kuni {QUIZ_TIME}\n"
         f"📊 <b>So'rovnoma:</b> har {POLL_DAY} {POLL_TIME}\n\n"
+        f"🧠 <b>Viktorina qanday ishlaydi:</b>\n"
+        f"Kanalga savol keladi, siz tugma orqali javob tanlaysiz.\n"
+        f"To'g'ri yoki noto'g'ri ekani shu zahoti aytiladi.\n"
+        f"<code>/score</code> — o'z natijangiz\n\n"
         f"🕐 <b>Real vaqtda vazifa:</b>\n"
         f"<code>/schedule 14:30 Bitcoin haqida yoz</code>\n"
         f"<code>/schedule +20m kripto tahlil</code>",
@@ -230,6 +291,50 @@ async def cmd_poll(message: Message):
         return
     await message.answer("🤖 So'rovnoma tayyorlanmoqda...")
     await create_and_send_poll()
+
+
+@router.message(Command("quiz"))
+async def cmd_quiz(message: Message):
+    """Viktorina: /quiz — kanalga, /quiz 123 — faqat admonga."""
+    if message.from_user.id != ADMIN_ID:
+        return
+
+    args = message.text.split()
+    target = ADMIN_ID
+    if len(args) > 1 and args[1].isdigit():
+        target = int(args[1])
+
+    await message.answer("🧠 Viktorina tayyorlanmoqda...")
+    qid = await publish_quiz(target)
+    if not qid:
+        await message.answer(
+            "❌ Viktorina yaratilmadi.\n"
+            "Sabab: AI kvota tugagan. Keyinroq yana urinib ko'ring."
+        )
+    elif target == ADMIN_ID:
+        await message.answer(
+            f"🧠 Viktorina #{qid} tayyor.\n\n"
+            f"Kanalga yuborish uchun: <code>/quiz</code> (adminga) yoki "
+            f"yuqoridagi ✅ tugmasi.",
+            parse_mode=ParseMode.HTML
+        )
+
+
+@router.message(Command("score"))
+async def cmd_score(message: Message):
+    """Foydalanuvchining viktorina natijasi."""
+    s = await database.get_user_quiz_stats(message.from_user.id)
+    if not s["total"]:
+        await message.answer("📊 Siz hali viktorinada qatnashmadingiz.")
+        return
+    pct = int(s["correct"] / s["total"] * 100)
+    await message.answer(
+        f"📊 <b>Sizning natijangiz</b>\n\n"
+        f"✅ To'g'ri: <b>{s['correct']}</b>\n"
+        f"📝 Jami: <b>{s['total']}</b>\n"
+        f"🎯 Aniqlik: <b>{pct}%</b>",
+        parse_mode=ParseMode.HTML
+    )
 
 
 @router.message(Command("schedule"))
@@ -741,6 +846,66 @@ async def cb_skip(callback: CallbackQuery):
         pass
     await callback.message.answer(f"⏭ Post #{post_id} o'tkazib yuborildi.")
     await callback.answer("⏭ O'tkazildi")
+
+
+# ===== VIKTORINA JAVOB TEKSHIRUVI =====
+@router.callback_query(F.data.startswith("quiz_"))
+async def cb_quiz(callback: CallbackQuery):
+    """Odam javob tanladi — to'g'ri yoki xato ekanini aytamiz."""
+    try:
+        _, qid, chosen = callback.data.split("_")
+        qid = int(qid)
+        chosen = int(chosen)
+    except (ValueError, IndexError):
+        return await callback.answer("❌ Noto'g'ri", show_alert=True)
+
+    quiz = await database.get_quiz(qid)
+    if not quiz:
+        return await callback.answer("❌ Viktorina topilmadi", show_alert=True)
+
+    import json as _json
+    options = _json.loads(quiz["options"])
+    answer = quiz["answer"]
+
+    # odam allaqachin javob berganmi?
+    first = await database.record_vote(qid, callback.from_user.id, chosen)
+    if not first:
+        return await callback.answer(
+            "Siz allaqachin javob bergansiz", show_alert=True)
+
+    st = await database.get_quiz_stats(qid)
+    votes = st["votes"] if st else 0
+    correct_n = st["correct_count"] if st else 0
+
+    if chosen == answer:
+        pct = int(correct_n / votes * 100) if votes else 0
+        text = (
+            f"✅ <b>To'g'ri!</b>\n\n"
+            f"Javob: <b>{html.escape(options[answer])}</b>\n"
+            f"📊 Hozir: {correct_n}/{votes} to'g'ri ({pct}%)"
+        )
+        if quiz.get("explanation"):
+            text += f"\n\n💡 {html.escape(quiz['explanation'])}"
+    else:
+        pct = int(correct_n / votes * 100) if votes else 0
+        text = (
+            f"❌ <b>Noto'g'ri</b>\n\n"
+            f"Sizning javob: {html.escape(options[chosen])}\n"
+            f"To'g'ri javob: <b>{html.escape(options[answer])}</b>\n"
+            f"📊 Hozir: {correct_n}/{votes} to'g'ri ({pct}%)"
+        )
+        if quiz.get("explanation"):
+            text += f"\n\n💡 {html.escape(quiz['explanation'])}"
+
+    await callback.answer(
+        ("To'g'ri!" if chosen == answer else "Noto'g'ri")[:200],
+        show_alert=True)
+
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+        await callback.message.reply(text, parse_mode=ParseMode.HTML)
+    except TelegramBadRequest:
+        pass
 
 
 @router.callback_query(F.data.startswith("poll_send_"))

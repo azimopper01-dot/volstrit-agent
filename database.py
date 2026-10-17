@@ -110,6 +110,35 @@ async def init_db():
             )
         """)
 
+        # Viktorina savollari va odamlarning javoblari
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS quizzes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question TEXT NOT NULL,
+                options TEXT NOT NULL,
+                answer INTEGER NOT NULL,
+                explanation TEXT DEFAULT '',
+                status TEXT DEFAULT 'pending',
+                message_id INTEGER,
+                votes INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                created_at TEXT,
+                sent_at TEXT
+            )
+        """)
+
+        await db.execute("""
+            CREATE TABLE IF NOT EXISTS quiz_votes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                quiz_id INTEGER NOT NULL,
+                user_id INTEGER NOT NULL,
+                chosen INTEGER NOT NULL,
+                is_correct INTEGER DEFAULT 0,
+                voted_at TEXT,
+                UNIQUE(quiz_id, user_id)
+            )
+        """)
+
         # Migratsiya: eski bazalarda "category" ustuni yo'q bo'lishi mumkin
         cur = await db.execute("PRAGMA table_info(posts)")
         cols = {r[1] for r in await cur.fetchall()}
@@ -182,6 +211,85 @@ async def update_post_content(post_id: int, content: str):
         "UPDATE posts SET content = ?, created_at = ? WHERE id = ?",
         (content, now_iso(), post_id)
     )
+
+
+# ===== VIKTORINA =====
+async def save_quiz(question: str, options: list, answer: int,
+                    explanation: str = "") -> int:
+    async with aiosqlite.connect(DB_PATH) as db:
+        cur = await db.execute(
+            "INSERT INTO quizzes (question, options, answer, explanation, "
+            "created_at) VALUES (?, ?, ?, ?, ?)",
+            (question, json.dumps(options, ensure_ascii=False), answer,
+             explanation or "", now_iso())
+        )
+        await db.commit()
+        return cur.lastrowid
+
+
+async def get_quiz(quiz_id: int):
+    return await _query_one("SELECT * FROM quizzes WHERE id = ?", (quiz_id,))
+
+
+async def set_quiz_sent(quiz_id: int, message_id: int):
+    await _execute(
+        "UPDATE quizzes SET status='sent', message_id=?, sent_at=? WHERE id=?",
+        (message_id, now_iso(), quiz_id)
+    )
+
+
+async def record_vote(quiz_id: int, user_id: int, chosen: int) -> bool:
+    """
+    Odamning javobini saqlaydi. Qaytaradi: True agar bu BIRINCHI javob.
+
+    Takror javob (double-click) hisobga olinmaydi.
+    """
+    row = await _query_one(
+        "SELECT id, answer FROM quizzes WHERE id = ?", (quiz_id,))
+    if not row:
+        return False
+
+    dup = await _query_one(
+        "SELECT id FROM quiz_votes WHERE quiz_id = ? AND user_id = ?",
+        (quiz_id, user_id))
+    if dup:
+        return False
+
+    correct = 1 if chosen == row["answer"] else 0
+    await _execute(
+        "INSERT INTO quiz_votes (quiz_id, user_id, chosen, is_correct, voted_at)"
+        " VALUES (?, ?, ?, ?, ?)",
+        (quiz_id, user_id, chosen, correct, now_iso())
+    )
+    await _execute(
+        "UPDATE quizzes SET votes = votes + 1, "
+        "correct_count = correct_count + ? WHERE id = ?",
+        (correct, quiz_id)
+    )
+    return True
+
+
+async def get_quiz_stats(quiz_id: int):
+    return await _query_one(
+        "SELECT votes, correct_count FROM quizzes WHERE id = ?", (quiz_id,))
+
+
+async def get_recent_quiz_questions(limit: int = 10):
+    """Yaqinda berilgan savollar — takrorlanmaslik uchun."""
+    rows = await _query_all(
+        "SELECT question FROM quizzes ORDER BY created_at DESC LIMIT ?",
+        (limit,))
+    return {r["question"] for r in rows}
+
+
+async def get_user_quiz_stats(user_id: int):
+    """Bitta odamning umumiy natijasi (necha / nechtan)."""
+    row = await _query_one(
+        "SELECT COUNT(*) AS total, SUM(is_correct) AS correct "
+        "FROM quiz_votes WHERE user_id = ?", (user_id,))
+    if not row:
+        return {"total": 0, "correct": 0}
+    return {"total": row["total"] or 0, "correct": row["correct"] or 0}
 
 
 async def get_pending_posts():

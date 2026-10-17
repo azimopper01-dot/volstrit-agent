@@ -138,6 +138,10 @@ POST_TIME_EVENING = os.getenv("POST_TIME_EVENING", "18:30")
 POLL_DAY = os.getenv("POLL_DAY", "sunday")
 POLL_TIME = os.getenv("POLL_TIME", "10:00")
 
+# ===== VIKTORINA (kundalik savol-javob) =====
+QUIZ_TIME = os.getenv("QUIZ_TIME", "20:00")
+QUIZ_ENABLED = _env_bool("QUIZ_ENABLED", True)
+
 
 # ===== YUBORISH TARTIBI =====
 # true  -> AI posti tayyor bo'lgach avtomatik kanalga chiqadi (tugmalar orqali
