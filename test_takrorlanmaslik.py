@@ -67,6 +67,26 @@ async def main():
         for r in repeat:
             print(f"    ⚠️ {r}")
 
+    # ---------- KVOTA HISOBI ----------
+    # Xatoli so'rovlar HAM kvotaga kirishi shart: Google so'rovni
+    # yuborilganini hisoblaydi, natijani emas. Aks holda bot o'z
+    # chegarasidan o'tib ketadi va kun oxirida postlar statik
+    # matnga tushadi.
+    print("\n📊 KVOTA HISOBI (xatolar ham hisoblanadi)")
+    for s in ("", "-shm", "-wal"):
+        if os.path.exists(DB + s):
+            os.remove(DB + s)
+    await d.init_db()
+    await d.record_ai_call(True, "muvaffaqiyatli")
+    await d.record_ai_call(False, "xato")
+    await d.record_ai_call(True, "muvaffaqiyatli")
+    all_n = await d.ai_used_today()
+    ok_n = await d.ai_success_today()
+    print(f"   3 ta so'rov (1 tasi xato) -> hisob: {all_n}, "
+          f"muvaffaqiyatli: {ok_n}")
+    ok_count = (all_n == 3 and ok_n == 2)
+    print(f"   {'✅' if ok_count else '❌'} xatolar ham kvotaga kiradi")
+
     # ---------- KVOTA BYUDJETI ----------
     # Bepul reja: kuniga ~20 so'rov. Bot 3 post + 1 viktorina yozadi.
     #
@@ -140,7 +160,7 @@ async def main():
         if os.path.exists(DB + suffix):
             os.remove(DB + suffix)
     return 0 if (not repeat and len(set(heads)) == 9
-                 and ok_budget and ok_q) else 1
+                 and ok_budget and ok_q and ok_count) else 1
 
 
 if __name__ == "__main__":

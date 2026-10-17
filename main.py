@@ -18,7 +18,7 @@ from config import (
     DB_IS_PERSISTENT, TIMEZONE, now_tz, AUTO_PUBLISH, AUTO_PUBLISH_LABEL,
     AI_DAILY_LIMIT,
 )
-from database import init_db, ai_used_today
+from database import init_db, ai_used_today, ai_success_today
 from telegram_bot import bot, dp, safe_send
 from scheduler import (
     start_scheduler, stop_scheduler, catch_up_missed_jobs,
@@ -57,7 +57,9 @@ async def on_startup():
     await catch_up_missed_jobs()
 
     used = await ai_used_today()
-    print(f"🤖 AI bugun: {used}/{AI_DAILY_LIMIT}")
+    ok = await ai_success_today()
+    print(f"🤖 AI bugun: {ok}/{AI_DAILY_LIMIT} muvaffaqiyatli "
+          f"({used} ta so'rov umuman)")
     print(f"📤 Avtomatik kanalga yuborish: {AUTO_PUBLISH_LABEL}")
 
     await notify_startup(next_run_summary())

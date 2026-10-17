@@ -595,8 +595,14 @@ async def record_image_call(success: bool = True, note: str = ""):
 
 
 async def ai_used_images_today() -> int:
+    """
+    Bugun yuborilgan rasm so'rovlari.
+
+    Xatoli so'rovlar ham hisoblanadi — Google kvotasi so'rov
+    YUBORILGANINI hisoblaydi, natijani emas.
+    """
     row = await _query_one(
-        "SELECT COUNT(*) AS c FROM image_usage WHERE success = 1 AND DATE(ts) = ?",
+        "SELECT COUNT(*) AS c FROM image_usage WHERE DATE(ts) = ?",
         (today_str(),)
     )
     return row["c"] if row else 0

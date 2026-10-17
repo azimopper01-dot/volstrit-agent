@@ -588,25 +588,37 @@ async def main():
           all(c in ai.CATEGORY_HINTS for c in cats))
 
     # Kunlik reja: 9 ta postda qanchayot turli kategoriya chiqishi kerak
-    seen_cats = set()
-    used_r = set()
-    for i in range(9):
-        t = ["morning", "noon", "evening"][i % 3]
-        tp, cat = ai._pick_topic(t, used_r)
-        used_r.add(tp.split(" — ")[0])
-        seen_cats.add(cat)
-    check("9 ta postda kamida 4 ta turli kategoriya",
-          len(seen_cats) >= 4, f"{len(seen_cats)} ta: {', '.join(sorted(seen_cats))}")
+    #
+    # DIQQAT: bu test TASODIFIY tanlashga bog'liq bo'lsa, omadli yoki
+    # komamli natija berib testni yiqitadi. Shuning uchun `random.seed`
+    # bilan qo'yamiz — natija har doim bir xil chiqadi.
+    saved_seed = random.getstate()
+    try:
+        random.seed(20261017)
+        seen_cats = set()
+        used_r = set()
+        for i in range(9):
+            t = ["morning", "noon", "evening"][i % 3]
+            tp, cat = ai._pick_topic(t, used_r)
+            used_r.add(tp.split(" — ")[0])
+            seen_cats.add(cat)
+        check("9 ta postda kamida 4 ta turli kategoriya",
+              len(seen_cats) >= 4,
+              f"{len(seen_cats)} ta: {', '.join(sorted(seen_cats))}")
 
-    # Ertalab ko'proq yangilik, kechki ko'proq xato/motivatsiya bo'lishi kerak
-    morning_cats, evening_cats = set(), set()
-    for _ in range(15):
-        morning_cats.add(ai._pick_topic("morning", set())[1])
-        evening_cats.add(ai._pick_topic("evening", set())[1])
+        # Ertalab ko'proq yangilik/fx, kechki ko'proq xato/motivatsiya
+        random.seed(20261017)
+        morning_cats, evening_cats = set(), set()
+        for _ in range(15):
+            morning_cats.add(ai._pick_topic("morning", set())[1])
+            evening_cats.add(ai._pick_topic("evening", set())[1])
+    finally:
+        random.setstate(saved_seed)
     check("ertalabda yangilik/fx ko'p uchraydi",
           bool(morning_cats & {"yangilik", "fx"}), str(sorted(morning_cats)))
     check("kechqurun xato/motivatsiya ko'p uchraydi",
-          bool(evening_cats & {"xatolar", "motivatsiya"}), str(sorted(evening_cats)))
+          bool(evening_cats & {"xatolar", "motivatsiya"}),
+          str(sorted(evening_cats)))
 
     # ---------- 15. QAYTA YOZISH ----------
     print("\n1️⃣5️⃣ Qayta yozish eski matnni qaytarmasligi kerak")
